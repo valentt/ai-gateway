@@ -1,0 +1,43 @@
+{
+  "name": "ai-gateway",
+  "version": "1.0.0",
+  "description": "Franz za AI - Unified AI Chat Gateway with Local API",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win"
+  },
+  "keywords": [
+    "ai",
+    "chatgpt",
+    "claude",
+    "gemini",
+    "electron",
+    "api-gateway"
+  ],
+  "author": "3D Tvornica",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "electron-rebuild": "^3.2.9"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.2.2",
+    "cors": "^2.8.5",
+    "electron-store": "^8.1.0",
+    "express": "^4.18.2"
+  },
+  "build": {
+    "appId": "hr.3dtvornica.ai-gateway",
+    "productName": "AI Gateway",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
