@@ -18,12 +18,15 @@ const { initDatabase, saveConversation, saveMessage } = require('./db/database')
 const { startApiServer, stopApiServer } = require('./api/server');
 const { extractors } = require('./extractors');
 
-// Enable media/WebRTC features for voice input
-app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
-app.commandLine.appendSwitch('enable-speech-dispatcher');
+
+// Enable media/WebRTC features for voice input (Linux only - crashes on Windows)
+if (process.platform !== 'win32') {
+  app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
+  app.commandLine.appendSwitch('enable-speech-dispatcher');
+}
+// These work on all platforms
 app.commandLine.appendSwitch('enable-usermedia-screen-capturing');
 app.commandLine.appendSwitch('auto-accept-camera-and-microphone-capture');
-app.commandLine.appendSwitch('use-fake-ui-for-media-stream'); // Skip browser permission UI
 
 // Keep a global reference of the window object
 let mainWindow = null;
@@ -133,8 +136,8 @@ function createWindow() {
       webviewTag: true,  // Enable <webview> tag
       partition: 'persist:main'
     },
-    title: 'AI Gateway',
-    icon: path.join(__dirname, '../assets/icon.png')
+    title: 'AI Gateway'
+    // icon: path.join(__dirname, '../assets/icon.png')  // TODO: Add icon
   });
 
   // Load the main HTML file
@@ -203,6 +206,12 @@ app.on('web-contents-created', (event, contents) => {
         label: 'Copy Link URL',
         click: () => {
           clipboard.writeText(params.linkURL);
+        }
+      });
+      menuTemplate.push({
+        label: 'Open in Default Browser',
+        click: () => {
+          require('electron').shell.openExternal(params.linkURL);
         }
       });
       menuTemplate.push({ type: 'separator' });
@@ -439,6 +448,12 @@ ipcMain.on('show-context-menu', (event, params) => {
       label: 'Copy Link URL',
       click: () => {
         clipboard.writeText(linkURL);
+      }
+    });
+    menuTemplate.push({
+      label: 'Open in Default Browser',
+      click: () => {
+        require('electron').shell.openExternal(linkURL);
       }
     });
     menuTemplate.push({ type: 'separator' });
