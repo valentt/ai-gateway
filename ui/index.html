@@ -1353,10 +1353,10 @@
       console.log('[ImageGen] Received request:', data.prompt);
 
       try {
-        // Switch to grok-imagine tab
-        const platformId = 'grok-imagine';
+        // Use the main 'grok' platform (Imagine is a tab within it)
+        const platformId = 'grok';
         if (!platforms[platformId]) {
-          window.aiGateway.sendImageResult({ success: false, error: 'Grok Imagine platform not found' });
+          window.aiGateway.sendImageResult({ success: false, error: 'Grok platform not found' });
           return;
         }
 
@@ -1379,69 +1379,107 @@
         // Wait a bit for tab switch
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Inject script to type prompt and generate
-        const generateScript = `
+        // Step 1: First navigate to Imagine tab within Grok
+        const navigateToImagineScript = `
           (function() {
             try {
-              // Check if we're logged in (look for sign-in prompts)
-              const pageText = document.body.innerText || '';
+              // Look for Imagine tab/button/link in Grok interface
+              const allElements = document.querySelectorAll('a, button, [role="tab"], [role="button"], nav a, nav button');
+              let imagineTab = null;
 
-              // Check if page has prominent sign-in buttons
-              const buttons = document.querySelectorAll('button');
-              let hasSignInButton = false;
-              for (const btn of buttons) {
-                const text = (btn.innerText || '').toLowerCase();
-                if ((text.includes('sign in') || text.includes('log in')) && btn.offsetWidth > 50) {
-                  hasSignInButton = true;
+              for (const el of allElements) {
+                const text = (el.innerText || el.textContent || '').toLowerCase();
+                const href = el.getAttribute('href') || '';
+                const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
+
+                if (text.includes('imagine') || href.includes('imagine') || ariaLabel.includes('imagine')) {
+                  imagineTab = el;
                   break;
                 }
               }
 
-              if (hasSignInButton && (pageText.includes('Sign in') || pageText.includes('Log in'))) {
-                return { success: false, error: 'Not logged in - please log in to Grok with your X account first. Open AI Gateway and click the Grok Imagine tab to log in.' };
-              }
+              if (imagineTab) {
+                imagineTab.click();
+                return { success: true, message: 'Navigated to Imagine tab', found: true };
+              } else {
+                // Check if we're already on Imagine page
+                const url = window.location.href;
+                if (url.includes('imagine')) {
+                  return { success: true, message: 'Already on Imagine page', found: true };
+                }
 
-              // Debug: collect all inputs and textareas
+                // List all clickable elements for debugging
+                const clickables = Array.from(allElements).slice(0, 10).map(el => ({
+                  tag: el.tagName,
+                  text: (el.innerText || '').substring(0, 30),
+                  href: el.getAttribute('href'),
+                  class: el.className?.substring?.(0, 50)
+                }));
+
+                return { success: false, error: 'Could not find Imagine tab', debug: { clickables, url } };
+              }
+            } catch (e) {
+              return { success: false, error: e.message };
+            }
+          })();
+        `;
+
+        // Try to navigate to Imagine tab first
+        console.log('[ImageGen] Navigating to Imagine tab...');
+        const navResult = await webview.executeJavaScript(navigateToImagineScript);
+        console.log('[ImageGen] Navigation result:', navResult);
+
+        if (!navResult.success) {
+          window.aiGateway.sendImageResult(navResult);
+          return;
+        }
+
+        // Wait for Imagine tab to load
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Step 2: Now type prompt and generate
+        const generateScript = `
+          (function() {
+            try {
+              // Debug: collect page info
+              const url = window.location.href;
               const allInputs = document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]');
               const inputInfo = Array.from(allInputs).map(el => ({
                 tag: el.tagName,
                 id: el.id,
-                class: el.className,
+                class: (el.className || '').substring(0, 50),
                 placeholder: el.placeholder,
-                role: el.getAttribute('role')
+                visible: el.offsetWidth > 0
               }));
 
               // Find prompt input - try multiple strategies
               let promptInput = null;
 
               // Strategy 1: Look for contenteditable div (common in modern chat UIs)
-              promptInput = document.querySelector('[contenteditable="true"]');
+              const editables = document.querySelectorAll('[contenteditable="true"]');
+              for (const ed of editables) {
+                if (ed.offsetWidth > 100) {  // Must be visible and reasonably sized
+                  promptInput = ed;
+                  break;
+                }
+              }
 
-              // Strategy 2: Textarea with relevant placeholder
+              // Strategy 2: Textarea
               if (!promptInput) {
                 const textareas = document.querySelectorAll('textarea');
                 for (const ta of textareas) {
-                  const ph = (ta.placeholder || '').toLowerCase();
-                  if (ph.includes('prompt') || ph.includes('imagine') || ph.includes('describe') ||
-                      ph.includes('message') || ph.includes('type') || ph.includes('ask')) {
+                  if (ta.offsetWidth > 100) {
                     promptInput = ta;
                     break;
                   }
                 }
               }
 
-              // Strategy 3: Any textarea
-              if (!promptInput) {
-                promptInput = document.querySelector('textarea');
-              }
-
-              // Strategy 4: Input with relevant class/placeholder
+              // Strategy 3: Any visible text input
               if (!promptInput) {
                 const inputs = document.querySelectorAll('input[type="text"]');
                 for (const input of inputs) {
-                  if (input.placeholder?.toLowerCase().includes('prompt') ||
-                      input.className?.includes('prompt') ||
-                      input.className?.includes('input')) {
+                  if (input.offsetWidth > 100) {
                     promptInput = input;
                     break;
                   }
@@ -1451,8 +1489,8 @@
               if (!promptInput) {
                 return {
                   success: false,
-                  error: 'Could not find prompt input',
-                  debug: { inputCount: allInputs.length, inputs: inputInfo.slice(0, 5) }
+                  error: 'Could not find prompt input on Imagine page',
+                  debug: { url, inputCount: allInputs.length, inputs: inputInfo.slice(0, 5) }
                 };
               }
 
@@ -1460,43 +1498,50 @@
               promptInput.focus();
 
               if (promptInput.contentEditable === 'true') {
-                // For contenteditable divs
                 promptInput.innerText = ${JSON.stringify(data.prompt)};
                 promptInput.dispatchEvent(new Event('input', { bubbles: true }));
               } else {
-                // For input/textarea
                 promptInput.value = ${JSON.stringify(data.prompt)};
                 promptInput.dispatchEvent(new Event('input', { bubbles: true }));
                 promptInput.dispatchEvent(new Event('change', { bubbles: true }));
               }
 
-              // Find generate button
-              const buttons = document.querySelectorAll('button, [role="button"]');
+              // Small delay for input to register (synchronous)
+
+              // Find and click generate button
+              const allButtons = document.querySelectorAll('button, [role="button"]');
               let generateBtn = null;
 
-              for (const btn of buttons) {
+              for (const btn of allButtons) {
+                if (btn.offsetWidth < 20) continue; // Skip tiny buttons
+
                 const text = (btn.innerText || btn.textContent || '').toLowerCase();
                 const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+
                 if (text.includes('generate') || text.includes('imagine') || text.includes('create') ||
-                    text.includes('submit') || text.includes('send') ||
-                    ariaLabel.includes('generate') || ariaLabel.includes('send')) {
+                    ariaLabel.includes('generate') || ariaLabel.includes('imagine')) {
                   generateBtn = btn;
                   break;
                 }
               }
 
-              // Try submit button or icon button
+              // Try submit or send button
               if (!generateBtn) {
-                generateBtn = document.querySelector('button[type="submit"], button svg, [class*="send"], [class*="submit"]');
+                for (const btn of allButtons) {
+                  const text = (btn.innerText || '').toLowerCase();
+                  if (text.includes('submit') || text.includes('send')) {
+                    generateBtn = btn;
+                    break;
+                  }
+                }
               }
 
               if (generateBtn) {
                 generateBtn.click();
-                return { success: true, message: 'Prompt submitted, waiting for generation...' };
+                return { success: true, message: 'Prompt submitted via button' };
               } else {
-                // Try pressing Enter
+                // Try Enter key
                 promptInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
-                promptInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
                 return { success: true, message: 'Prompt submitted via Enter' };
               }
             } catch (e) {
@@ -1518,6 +1563,7 @@
         const maxAttempts = 30; // 30 seconds max
 
         const pollForImages = async () => {
+          // Use grok-imagine extractor (it looks for large images)
           const extractorScript = await window.aiGateway.getExtractor('grok-imagine');
           const result = await webview.executeJavaScript(extractorScript);
 
@@ -1538,14 +1584,14 @@
           } else {
             window.aiGateway.sendImageResult({
               success: false,
-              error: 'Timeout waiting for image generation',
+              error: 'Timeout waiting for image generation (30s)',
               prompt: data.prompt
             });
           }
         };
 
-        // Start polling after 3 seconds (give time for generation to start)
-        setTimeout(pollForImages, 3000);
+        // Start polling after 5 seconds (give time for generation to start)
+        setTimeout(pollForImages, 5000);
 
       } catch (error) {
         console.error('[ImageGen] Error:', error);

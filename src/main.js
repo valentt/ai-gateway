@@ -123,12 +123,6 @@ const AI_PLATFORMS = {
     icon: 'manus.png',
     tier: 2
   },
-  'grok-imagine': {
-    name: 'Grok Imagine',
-    url: 'https://grok.com/imagine',
-    icon: 'grok.png',
-    tier: 1
-  }
 };
 
 // Default port for API server (8088 to avoid Docker conflicts)
