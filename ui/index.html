@@ -1348,6 +1348,148 @@
       }
     }
 
+    // Handle image generation requests from API
+    window.aiGateway.onGenerateImage(async (data) => {
+      console.log('[ImageGen] Received request:', data.prompt);
+
+      try {
+        // Switch to grok-imagine tab
+        const platformId = 'grok-imagine';
+        if (!platforms[platformId]) {
+          window.aiGateway.sendImageResult({ success: false, error: 'Grok Imagine platform not found' });
+          return;
+        }
+
+        // Ensure webview exists
+        const activeProfileId = activeProfiles[platformId] || 'default';
+        const key = `${platformId}-${activeProfileId}`;
+        let webview = webviews[key];
+
+        if (!webview) {
+          // Create webview if it doesn't exist
+          await createWebview(platformId, activeProfileId);
+          webview = webviews[key];
+          // Wait for page to load
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+
+        // Switch to the tab
+        switchTab(platformId);
+
+        // Wait a bit for tab switch
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Inject script to type prompt and generate
+        const generateScript = `
+          (function() {
+            try {
+              // Find prompt input
+              const inputs = document.querySelectorAll('textarea, input[type="text"]');
+              let promptInput = null;
+
+              for (const input of inputs) {
+                if (input.placeholder?.toLowerCase().includes('prompt') ||
+                    input.placeholder?.toLowerCase().includes('imagine') ||
+                    input.placeholder?.toLowerCase().includes('describe') ||
+                    input.className?.includes('prompt')) {
+                  promptInput = input;
+                  break;
+                }
+              }
+
+              // Fallback: just use first textarea
+              if (!promptInput) {
+                promptInput = document.querySelector('textarea');
+              }
+
+              if (!promptInput) {
+                return { success: false, error: 'Could not find prompt input' };
+              }
+
+              // Clear and type prompt
+              promptInput.focus();
+              promptInput.value = ${JSON.stringify(data.prompt)};
+              promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+              // Find generate button
+              const buttons = document.querySelectorAll('button');
+              let generateBtn = null;
+
+              for (const btn of buttons) {
+                const text = btn.innerText?.toLowerCase() || '';
+                if (text.includes('generate') || text.includes('imagine') || text.includes('create')) {
+                  generateBtn = btn;
+                  break;
+                }
+              }
+
+              if (!generateBtn) {
+                // Try submit button
+                generateBtn = document.querySelector('button[type="submit"]');
+              }
+
+              if (generateBtn) {
+                generateBtn.click();
+                return { success: true, message: 'Prompt submitted, waiting for generation...' };
+              } else {
+                // Try pressing Enter
+                promptInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+                return { success: true, message: 'Prompt submitted via Enter' };
+              }
+            } catch (e) {
+              return { success: false, error: e.message };
+            }
+          })();
+        `;
+
+        const submitResult = await webview.executeJavaScript(generateScript);
+        console.log('[ImageGen] Submit result:', submitResult);
+
+        if (!submitResult.success) {
+          window.aiGateway.sendImageResult(submitResult);
+          return;
+        }
+
+        // Wait for image generation (poll for images)
+        let attempts = 0;
+        const maxAttempts = 30; // 30 seconds max
+
+        const pollForImages = async () => {
+          const extractorScript = await window.aiGateway.getExtractor('grok-imagine');
+          const result = await webview.executeJavaScript(extractorScript);
+
+          console.log('[ImageGen] Poll attempt', attempts, '- found', result.images?.length || 0, 'images');
+
+          if (result.images && result.images.length > 0) {
+            window.aiGateway.sendImageResult({
+              success: true,
+              images: result.images,
+              prompt: data.prompt
+            });
+            return;
+          }
+
+          attempts++;
+          if (attempts < maxAttempts) {
+            setTimeout(pollForImages, 1000);
+          } else {
+            window.aiGateway.sendImageResult({
+              success: false,
+              error: 'Timeout waiting for image generation',
+              prompt: data.prompt
+            });
+          }
+        };
+
+        // Start polling after 3 seconds (give time for generation to start)
+        setTimeout(pollForImages, 3000);
+
+      } catch (error) {
+        console.error('[ImageGen] Error:', error);
+        window.aiGateway.sendImageResult({ success: false, error: error.message });
+      }
+    });
+
     // Initialize on load
     init();
   </script>

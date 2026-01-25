@@ -16,6 +16,10 @@
 
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const https = require('https');
+const http = require('http');
 const {
   getHistory,
   getMessages,
@@ -27,6 +31,69 @@ const {
 
 let server = null;
 let app = null;
+
+// Helper to download image from URL
+function downloadImage(url, filepath) {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+    const file = fs.createWriteStream(filepath);
+
+    protocol.get(url, (response) => {
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve(filepath);
+      });
+    }).on('error', (err) => {
+      fs.unlink(filepath, () => {});
+      reject(err);
+    });
+  });
+}
+
+// Image generation via main process
+async function generateImageViaIpc(prompt, saveTo) {
+  // Import generateImage from main - deferred to avoid circular dependency
+  const { generateImage } = require('../main');
+
+  const result = await generateImage(prompt, saveTo);
+
+  // Save images if requested
+  if (result.success && result.images && result.images.length > 0 && saveTo) {
+    try {
+      if (!fs.existsSync(saveTo)) {
+        fs.mkdirSync(saveTo, { recursive: true });
+      }
+
+      const savedPaths = [];
+      for (let i = 0; i < result.images.length; i++) {
+        const img = result.images[i];
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `grok-imagine-${timestamp}-${i}.jpg`;
+        const filepath = path.join(saveTo, filename);
+
+        if (img.src.startsWith('data:')) {
+          // Base64 image
+          const base64Data = img.src.replace(/^data:image\/\w+;base64,/, '');
+          fs.writeFileSync(filepath, Buffer.from(base64Data, 'base64'));
+          savedPaths.push(filepath);
+        } else if (img.src.startsWith('blob:')) {
+          // Cannot save blob URLs from main process
+          savedPaths.push({ error: 'Blob URLs cannot be saved directly', src: img.src });
+        } else if (img.src.startsWith('http')) {
+          // Download from URL
+          await downloadImage(img.src, filepath);
+          savedPaths.push(filepath);
+        }
+      }
+      result.saved_to = savedPaths;
+    } catch (saveError) {
+      result.save_error = saveError.message;
+    }
+  }
+
+  return result;
+}
 
 /**
  * Create and configure Express app
@@ -186,6 +253,51 @@ function createApp() {
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
+  });
+
+  // POST /images/generate - Generate image using Grok Imagine
+  // This endpoint sends a prompt to Grok Imagine and returns the generated image
+  app.post('/images/generate', async (req, res) => {
+    try {
+      const { prompt, save_to } = req.body;
+
+      if (!prompt) {
+        return res.status(400).json({ error: 'prompt is required' });
+      }
+
+      // Send to main process via IPC (will be implemented)
+      const result = await generateImageViaIpc(prompt, save_to);
+
+      if (result.success) {
+        res.json({
+          success: true,
+          images: result.images,
+          prompt: prompt,
+          saved_to: result.saved_to
+        });
+      } else {
+        res.status(500).json({ error: result.error });
+      }
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET /images/generate - Info about the endpoint
+  app.get('/images/generate', (req, res) => {
+    res.json({
+      endpoint: 'POST /images/generate',
+      description: 'Generate images using Grok Imagine (web automation)',
+      parameters: {
+        prompt: 'Text description of the image to generate (required)',
+        save_to: 'Optional folder path to save the image'
+      },
+      example: {
+        prompt: 'A futuristic city at sunset',
+        save_to: 'D:/AI-Images'
+      },
+      note: 'Requires Grok Imagine tab to be logged in with X Premium account'
+    });
   });
 
   // 404 handler

@@ -244,6 +244,59 @@ const genericExtractor = `
 })();
 `;
 
+// Grok Imagine extractor - extracts generated image URLs
+const grokImagineExtractor = `
+(function() {
+  try {
+    const images = [];
+    const url = window.location.href;
+
+    // Find all generated images
+    // Grok Imagine uses img tags or canvas for generated images
+    const imgElements = document.querySelectorAll('img[src*="blob:"], img[src*="data:"], img[src*="generated"], img[src*="image"], img[alt*="Generated"]');
+
+    imgElements.forEach((img, i) => {
+      if (img.src && img.naturalWidth > 100) {  // Filter out tiny images
+        images.push({
+          type: 'image',
+          src: img.src,
+          alt: img.alt || 'Generated image ' + i,
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+
+    // Also look for download buttons/links near images
+    const downloadLinks = document.querySelectorAll('a[download], button[class*="download"]');
+    downloadLinks.forEach(link => {
+      if (link.href) {
+        images.push({
+          type: 'download_link',
+          src: link.href,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+
+    // Find the prompt input
+    const promptInput = document.querySelector('textarea, input[type="text"][placeholder*="prompt"], input[placeholder*="imagine"]');
+    const promptText = promptInput?.value || '';
+
+    return {
+      platform: 'grok-imagine',
+      images,
+      prompt: promptText,
+      url,
+      debug: { imageCount: images.length }
+    };
+  } catch (e) {
+    return { platform: 'grok-imagine', images: [], url: window.location.href, error: e.message };
+  }
+})();
+`;
+
 const extractors = {
   claude: claudeExtractor,
   chatgpt: chatgptExtractor,
@@ -253,6 +306,8 @@ const extractors = {
   deepseek: deepseekExtractor,
   kimi: genericExtractor,
   qwen: genericExtractor,
+  manus: genericExtractor,
+  'grok-imagine': grokImagineExtractor,
   generic: genericExtractor
 };
 

@@ -116,6 +116,18 @@ const AI_PLATFORMS = {
     url: 'https://tongyi.aliyun.com',
     icon: 'qwen.png',
     tier: 2
+  },
+  manus: {
+    name: 'Manus',
+    url: 'https://manus.im',
+    icon: 'manus.png',
+    tier: 2
+  },
+  'grok-imagine': {
+    name: 'Grok Imagine',
+    url: 'https://grok.com/imagine',
+    icon: 'grok.png',
+    tier: 1
   }
 };
 
@@ -432,8 +444,45 @@ ipcMain.handle('save-extracted-content', async (event, data) => {
   }
 });
 
+// Image generation via API
+let imageGenerationResolver = null;
+
+ipcMain.on('image-generated', (event, result) => {
+  console.log('[ImageGen] Received result from renderer:', result.success);
+  if (imageGenerationResolver) {
+    imageGenerationResolver(result);
+    imageGenerationResolver = null;
+  }
+});
+
+// Function for API server to call
+async function generateImage(prompt, saveTo) {
+  return new Promise((resolve, reject) => {
+    if (!mainWindow) {
+      resolve({ success: false, error: 'No main window' });
+      return;
+    }
+
+    // Set timeout
+    const timeout = setTimeout(() => {
+      imageGenerationResolver = null;
+      resolve({ success: false, error: 'Timeout (60s)' });
+    }, 60000);
+
+    // Store resolver
+    imageGenerationResolver = (result) => {
+      clearTimeout(timeout);
+      resolve(result);
+    };
+
+    // Send to renderer
+    mainWindow.webContents.send('generate-image', { prompt, saveTo });
+    console.log('[ImageGen] Sent request to renderer:', prompt);
+  });
+}
+
 // Export for API server access
-module.exports = { AI_PLATFORMS, mainWindow };
+module.exports = { AI_PLATFORMS, mainWindow, generateImage };
 
 // Context menu handler for webviews - Copy URL functionality
 ipcMain.on('show-context-menu', (event, params) => {

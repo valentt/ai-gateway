@@ -47,9 +47,17 @@ contextBridge.exposeInMainWorld('aiGateway', {
 
   // Receive message from main process
   receive: (channel, func) => {
-    const validChannels = ['conversation-saved', 'message-saved', 'platform-update', 'reload-webview'];
+    const validChannels = ['conversation-saved', 'message-saved', 'platform-update', 'reload-webview', 'generate-image'];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (event, ...args) => func(...args));
     }
+  },
+
+  // Send image generation result back to main process
+  sendImageResult: (result) => ipcRenderer.send('image-generated', result),
+
+  // Listen for image generation requests
+  onGenerateImage: (callback) => {
+    ipcRenderer.on('generate-image', (event, data) => callback(data));
   }
 });
