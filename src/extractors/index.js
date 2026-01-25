@@ -251,27 +251,51 @@ const grokImagineExtractor = `
     const images = [];
     const url = window.location.href;
 
-    // Find all generated images
-    // Grok Imagine uses img tags or canvas for generated images
-    const imgElements = document.querySelectorAll('img[src*="blob:"], img[src*="data:"], img[src*="generated"], img[src*="image"], img[alt*="Generated"]');
+    // Find all potential generated images
+    // Look for large images that are likely AI-generated outputs
+    const allImages = document.querySelectorAll('img');
 
-    imgElements.forEach((img, i) => {
-      if (img.src && img.naturalWidth > 100) {  // Filter out tiny images
-        images.push({
-          type: 'image',
-          src: img.src,
-          alt: img.alt || 'Generated image ' + i,
-          width: img.naturalWidth,
-          height: img.naturalHeight,
-          timestamp: new Date().toISOString()
-        });
+    allImages.forEach((img, i) => {
+      // Skip small images (icons, avatars, etc.)
+      if (img.naturalWidth < 200 || img.naturalHeight < 200) return;
+      // Skip images that are clearly UI elements
+      if (img.src.includes('logo') || img.src.includes('icon') || img.src.includes('avatar')) return;
+      // Skip profile pictures
+      if (img.className?.includes('avatar') || img.className?.includes('profile')) return;
+
+      images.push({
+        type: 'image',
+        src: img.src,
+        alt: img.alt || 'Generated image ' + i,
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    // Also look for canvas elements (some AI image generators render to canvas)
+    const canvases = document.querySelectorAll('canvas');
+    canvases.forEach((canvas, i) => {
+      if (canvas.width > 200 && canvas.height > 200) {
+        try {
+          const dataUrl = canvas.toDataURL('image/png');
+          images.push({
+            type: 'canvas',
+            src: dataUrl,
+            width: canvas.width,
+            height: canvas.height,
+            timestamp: new Date().toISOString()
+          });
+        } catch (e) {
+          // Canvas may be tainted (cross-origin)
+        }
       }
     });
 
-    // Also look for download buttons/links near images
-    const downloadLinks = document.querySelectorAll('a[download], button[class*="download"]');
+    // Look for download buttons/links near images
+    const downloadLinks = document.querySelectorAll('a[download], button[class*="download"], [aria-label*="download"]');
     downloadLinks.forEach(link => {
-      if (link.href) {
+      if (link.href && !images.some(img => img.src === link.href)) {
         images.push({
           type: 'download_link',
           src: link.href,
@@ -280,16 +304,16 @@ const grokImagineExtractor = `
       }
     });
 
-    // Find the prompt input
-    const promptInput = document.querySelector('textarea, input[type="text"][placeholder*="prompt"], input[placeholder*="imagine"]');
-    const promptText = promptInput?.value || '';
+    // Find the prompt input value
+    const promptInput = document.querySelector('textarea, [contenteditable="true"], input[type="text"]');
+    const promptText = promptInput?.value || promptInput?.innerText || '';
 
     return {
       platform: 'grok-imagine',
       images,
       prompt: promptText,
       url,
-      debug: { imageCount: images.length }
+      debug: { imageCount: images.length, totalImagesOnPage: allImages.length }
     };
   } catch (e) {
     return { platform: 'grok-imagine', images: [], url: window.location.href, error: e.message };

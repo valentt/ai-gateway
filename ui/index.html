@@ -1383,49 +1383,111 @@
         const generateScript = `
           (function() {
             try {
-              // Find prompt input
-              const inputs = document.querySelectorAll('textarea, input[type="text"]');
-              let promptInput = null;
+              // Check if we're logged in (look for sign-in prompts)
+              const pageText = document.body.innerText || '';
 
-              for (const input of inputs) {
-                if (input.placeholder?.toLowerCase().includes('prompt') ||
-                    input.placeholder?.toLowerCase().includes('imagine') ||
-                    input.placeholder?.toLowerCase().includes('describe') ||
-                    input.className?.includes('prompt')) {
-                  promptInput = input;
+              // Check if page has prominent sign-in buttons
+              const buttons = document.querySelectorAll('button');
+              let hasSignInButton = false;
+              for (const btn of buttons) {
+                const text = (btn.innerText || '').toLowerCase();
+                if ((text.includes('sign in') || text.includes('log in')) && btn.offsetWidth > 50) {
+                  hasSignInButton = true;
                   break;
                 }
               }
 
-              // Fallback: just use first textarea
+              if (hasSignInButton && (pageText.includes('Sign in') || pageText.includes('Log in'))) {
+                return { success: false, error: 'Not logged in - please log in to Grok with your X account first. Open AI Gateway and click the Grok Imagine tab to log in.' };
+              }
+
+              // Debug: collect all inputs and textareas
+              const allInputs = document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]');
+              const inputInfo = Array.from(allInputs).map(el => ({
+                tag: el.tagName,
+                id: el.id,
+                class: el.className,
+                placeholder: el.placeholder,
+                role: el.getAttribute('role')
+              }));
+
+              // Find prompt input - try multiple strategies
+              let promptInput = null;
+
+              // Strategy 1: Look for contenteditable div (common in modern chat UIs)
+              promptInput = document.querySelector('[contenteditable="true"]');
+
+              // Strategy 2: Textarea with relevant placeholder
+              if (!promptInput) {
+                const textareas = document.querySelectorAll('textarea');
+                for (const ta of textareas) {
+                  const ph = (ta.placeholder || '').toLowerCase();
+                  if (ph.includes('prompt') || ph.includes('imagine') || ph.includes('describe') ||
+                      ph.includes('message') || ph.includes('type') || ph.includes('ask')) {
+                    promptInput = ta;
+                    break;
+                  }
+                }
+              }
+
+              // Strategy 3: Any textarea
               if (!promptInput) {
                 promptInput = document.querySelector('textarea');
               }
 
+              // Strategy 4: Input with relevant class/placeholder
               if (!promptInput) {
-                return { success: false, error: 'Could not find prompt input' };
+                const inputs = document.querySelectorAll('input[type="text"]');
+                for (const input of inputs) {
+                  if (input.placeholder?.toLowerCase().includes('prompt') ||
+                      input.className?.includes('prompt') ||
+                      input.className?.includes('input')) {
+                    promptInput = input;
+                    break;
+                  }
+                }
+              }
+
+              if (!promptInput) {
+                return {
+                  success: false,
+                  error: 'Could not find prompt input',
+                  debug: { inputCount: allInputs.length, inputs: inputInfo.slice(0, 5) }
+                };
               }
 
               // Clear and type prompt
               promptInput.focus();
-              promptInput.value = ${JSON.stringify(data.prompt)};
-              promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+              if (promptInput.contentEditable === 'true') {
+                // For contenteditable divs
+                promptInput.innerText = ${JSON.stringify(data.prompt)};
+                promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+              } else {
+                // For input/textarea
+                promptInput.value = ${JSON.stringify(data.prompt)};
+                promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+                promptInput.dispatchEvent(new Event('change', { bubbles: true }));
+              }
 
               // Find generate button
-              const buttons = document.querySelectorAll('button');
+              const buttons = document.querySelectorAll('button, [role="button"]');
               let generateBtn = null;
 
               for (const btn of buttons) {
-                const text = btn.innerText?.toLowerCase() || '';
-                if (text.includes('generate') || text.includes('imagine') || text.includes('create')) {
+                const text = (btn.innerText || btn.textContent || '').toLowerCase();
+                const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                if (text.includes('generate') || text.includes('imagine') || text.includes('create') ||
+                    text.includes('submit') || text.includes('send') ||
+                    ariaLabel.includes('generate') || ariaLabel.includes('send')) {
                   generateBtn = btn;
                   break;
                 }
               }
 
+              // Try submit button or icon button
               if (!generateBtn) {
-                // Try submit button
-                generateBtn = document.querySelector('button[type="submit"]');
+                generateBtn = document.querySelector('button[type="submit"], button svg, [class*="send"], [class*="submit"]');
               }
 
               if (generateBtn) {
@@ -1433,7 +1495,8 @@
                 return { success: true, message: 'Prompt submitted, waiting for generation...' };
               } else {
                 // Try pressing Enter
-                promptInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+                promptInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+                promptInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
                 return { success: true, message: 'Prompt submitted via Enter' };
               }
             } catch (e) {
