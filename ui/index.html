@@ -1,1606 +1,610 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://localhost:*;">
-  <title>AI Gateway</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Header with tabs */
-    .header {
-      background: #161b22;
-      padding: 8px 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      border-bottom: 1px solid #30363d;
-      -webkit-app-region: drag;
-    }
-
-    .logo {
-      font-weight: bold;
-      font-size: 14px;
-      color: #58a6ff;
-      margin-right: 16px;
-      -webkit-app-region: no-drag;
-    }
-
-    .tabs {
-      display: flex;
-      gap: 4px;
-      flex-wrap: wrap;
-      -webkit-app-region: no-drag;
-    }
-
-    .tab {
-      padding: 8px 12px;
-      background: #21262d;
-      border: 1px solid #30363d;
-      border-radius: 6px 6px 0 0;
-      color: #8b949e;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      position: relative;
-    }
-
-    .tab:hover {
-      background: #30363d;
-      color: #e6edf3;
-    }
-
-    .tab.active {
-      background: #0d1117;
-      color: #58a6ff;
-      border-bottom-color: #0d1117;
-    }
-
-    .tab.search-tab {
-      background: #238636;
-      border-color: #238636;
-      color: #fff;
-    }
-
-    .tab.search-tab:hover {
-      background: #2ea043;
-    }
-
-    .tab.search-tab.active {
-      background: #238636;
-      color: #fff;
-    }
-
-    .tab .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #3fb950;
-    }
-
-    .tab .dot.loading {
-      background: #d29922;
-      animation: pulse 1s infinite;
-    }
-
-    .tab .profile-badge {
-      font-size: 10px;
-      background: #30363d;
-      padding: 2px 6px;
-      border-radius: 10px;
-      color: #8b949e;
-      max-width: 80px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .tab.active .profile-badge {
-      background: #21262d;
-      color: #58a6ff;
-    }
-
-    .tab .profile-arrow {
-      font-size: 10px;
-      margin-left: 2px;
-      opacity: 0.6;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    /* Profile dropdown */
-    .profile-dropdown {
-      position: absolute;
-      top: 100%;
-      left: 0;
-      min-width: 200px;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-      z-index: 1000;
-      display: none;
-      padding: 8px 0;
-    }
-
-    .profile-dropdown.visible {
-      display: block;
-    }
-
-    .profile-dropdown-header {
-      padding: 8px 12px;
-      font-size: 12px;
-      color: #8b949e;
-      border-bottom: 1px solid #30363d;
-      margin-bottom: 4px;
-    }
-
-    .profile-item {
-      padding: 8px 12px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      cursor: pointer;
-      color: #e6edf3;
-      font-size: 13px;
-    }
-
-    .profile-item:hover {
-      background: #21262d;
-    }
-
-    .profile-item.active {
-      background: #238636;
-      color: #fff;
-    }
-
-    .profile-item .profile-name {
-      flex: 1;
-    }
-
-    .profile-item .profile-actions {
-      display: flex;
-      gap: 4px;
-      opacity: 0;
-    }
-
-    .profile-item:hover .profile-actions {
-      opacity: 1;
-    }
-
-    .profile-item.active .profile-actions {
-      opacity: 1;
-    }
-
-    .profile-action-btn {
-      padding: 2px 6px;
-      background: none;
-      border: none;
-      color: #8b949e;
-      cursor: pointer;
-      font-size: 11px;
-      border-radius: 4px;
-    }
-
-    .profile-action-btn:hover {
-      background: rgba(255,255,255,0.1);
-      color: #e6edf3;
-    }
-
-    .profile-divider {
-      height: 1px;
-      background: #30363d;
-      margin: 4px 0;
-    }
-
-    .profile-add-btn {
-      padding: 8px 12px;
-      color: #58a6ff;
-      font-size: 13px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .profile-add-btn:hover {
-      background: #21262d;
-    }
-
-    /* API status indicator */
-    .api-status {
-      margin-left: auto;
-      font-size: 12px;
-      color: #3fb950;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      -webkit-app-region: no-drag;
-    }
-
-    .api-status .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #3fb950;
-    }
-
-    /* WebView container */
-    .webview-container {
-      flex: 1;
-      position: relative;
-      overflow: hidden;
-    }
-
-    webview {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      visibility: hidden;
-      pointer-events: none;
-    }
-
-    webview.active {
-      visibility: visible;
-      pointer-events: auto;
-    }
-
-    /* Search Panel */
-    .search-panel {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: #0d1117;
-      display: none;
-      flex-direction: column;
-      padding: 24px;
-    }
-
-    .search-panel.active {
-      display: flex;
-    }
-
-    .search-header {
-      margin-bottom: 24px;
-    }
-
-    .search-header h2 {
-      font-size: 24px;
-      color: #e6edf3;
-      margin-bottom: 16px;
-    }
-
-    .search-input-wrapper {
-      display: flex;
-      gap: 12px;
-    }
-
-    .search-input {
-      flex: 1;
-      padding: 12px 16px;
-      font-size: 16px;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #e6edf3;
-      outline: none;
-    }
-
-    .search-input:focus {
-      border-color: #58a6ff;
-      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
-    }
-
-    .search-input::placeholder {
-      color: #8b949e;
-    }
-
-    .search-btn {
-      padding: 12px 24px;
-      background: #238636;
-      border: none;
-      border-radius: 6px;
-      color: #fff;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .search-btn:hover {
-      background: #2ea043;
-    }
-
-    .search-filters {
-      display: flex;
-      gap: 12px;
-      margin-top: 12px;
-    }
-
-    .filter-select {
-      padding: 8px 12px;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #e6edf3;
-      font-size: 14px;
-    }
-
-    .search-results {
-      flex: 1;
-      overflow-y: auto;
-      margin-top: 24px;
-    }
-
-    .result-item {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 12px;
-    }
-
-    .result-item:hover {
-      border-color: #58a6ff;
-    }
-
-    .result-header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 8px;
-    }
-
-    .result-platform {
-      background: #21262d;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      color: #58a6ff;
-    }
-
-    .result-time {
-      color: #8b949e;
-      font-size: 12px;
-    }
-
-    .result-role {
-      background: #30363d;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-      color: #8b949e;
-    }
-
-    .result-content {
-      color: #e6edf3;
-      line-height: 1.5;
-    }
-
-    .result-content mark {
-      background: rgba(210, 153, 34, 0.4);
-      color: #e6edf3;
-      padding: 0 2px;
-      border-radius: 2px;
-    }
-
-    .no-results {
-      text-align: center;
-      color: #8b949e;
-      padding: 48px;
-    }
-
-    .stats-bar {
-      display: flex;
-      gap: 24px;
-      margin-top: 12px;
-      color: #8b949e;
-      font-size: 14px;
-    }
-
-    .stat {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .stat-value {
-      color: #e6edf3;
-      font-weight: 600;
-    }
-
-    .sync-btn {
-      padding: 6px 12px;
-      background: #21262d;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #58a6ff;
-      font-size: 12px;
-      cursor: pointer;
-      margin-left: auto;
-      transition: all 0.2s;
-    }
-
-    .sync-btn:hover {
-      background: #30363d;
-      border-color: #58a6ff;
-    }
-
-    /* Modal */
-    .modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0,0,0,0.7);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 2000;
-    }
-
-    .modal-overlay.visible {
-      display: flex;
-    }
-
-    .modal {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 12px;
-      padding: 24px;
-      min-width: 400px;
-      max-width: 500px;
-    }
-
-    .modal-header {
-      font-size: 18px;
-      color: #e6edf3;
-      margin-bottom: 16px;
-    }
-
-    .modal-input {
-      width: 100%;
-      padding: 12px 16px;
-      font-size: 14px;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #e6edf3;
-      outline: none;
-      margin-bottom: 16px;
-    }
-
-    .modal-input:focus {
-      border-color: #58a6ff;
-    }
-
-    .modal-actions {
-      display: flex;
-      gap: 12px;
-      justify-content: flex-end;
-    }
-
-    .modal-btn {
-      padding: 10px 20px;
-      border-radius: 6px;
-      font-size: 14px;
-      cursor: pointer;
-      border: none;
-    }
-
-    .modal-btn-primary {
-      background: #238636;
-      color: #fff;
-    }
-
-    .modal-btn-primary:hover {
-      background: #2ea043;
-    }
-
-    .modal-btn-secondary {
-      background: #21262d;
-      color: #e6edf3;
-      border: 1px solid #30363d;
-    }
-
-    .modal-btn-secondary:hover {
-      background: #30363d;
-    }
-
-    .modal-btn-danger {
-      background: #da3633;
-      color: #fff;
-    }
-
-    .modal-btn-danger:hover {
-      background: #f85149;
-    }
-
-    /* Loading overlay */
-    .loading-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(13, 17, 23, 0.9);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .loading-overlay.visible {
-      display: flex;
-    }
-
-    .spinner {
-      width: 48px;
-      height: 48px;
-      border: 4px solid #30363d;
-      border-top-color: #58a6ff;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    /* Scrollbar styling */
-    ::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: #161b22;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: #30363d;
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: #484f58;
-    }
-
-    /* Welcome message in search */
-    .welcome-hint {
-      text-align: center;
-      padding: 48px;
-      color: #8b949e;
-    }
-
-    .welcome-hint h3 {
-      color: #58a6ff;
-      margin-bottom: 12px;
-      font-size: 18px;
-    }
-
-    .welcome-hint p {
-      margin-bottom: 8px;
-    }
-
-    .keyboard-hint {
-      display: inline-block;
-      background: #21262d;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-family: monospace;
-      font-size: 12px;
-      margin: 0 4px;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Gateway</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #232736;
+    --border: #2d3148; --text: #e4e4e7; --text-dim: #71717a;
+    --accent: #6366f1; --accent-hover: #818cf8;
+    --claude: #d4a574; --gpt: #74aa9c; --gemini: #4285f4;
+    --qwen: #ff6b35; --llama: #a855f7; --mistral: #f97316;
+  }
+  body { font-family: -apple-system, 'Inter', 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* Layout */
+  .app { display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .sidebar-header h1 span { background: linear-gradient(135deg, var(--accent), #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .sidebar-header p { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+  .search-box { padding: 12px 20px; }
+  .search-box input { width: 100%; padding: 8px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px; outline: none; }
+  .search-box input:focus { border-color: var(--accent); }
+  .search-box input::placeholder { color: var(--text-dim); }
+
+  .history-list { flex: 1; overflow-y: auto; padding: 8px 12px; }
+  .history-category { margin-bottom: 16px; }
+  .history-category h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); padding: 4px 8px; margin-bottom: 4px; }
+  .history-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text-dim); transition: all 0.15s; display: flex; align-items: center; gap: 8px; }
+  .history-item:hover { background: var(--surface2); color: var(--text); }
+  .history-item.active { background: var(--accent); color: white; }
+  .history-item .models-used { display: flex; gap: 2px; margin-left: auto; }
+  .history-item .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  .new-chat-btn { margin: 12px 20px; padding: 10px; background: var(--accent); color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+  .new-chat-btn:hover { background: var(--accent-hover); }
+
+  /* Main */
+  .main { display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Top bar */
+  .topbar { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; background: var(--surface); }
+  .mode-toggle { display: flex; background: var(--surface2); border-radius: 8px; padding: 3px; }
+  .mode-btn { padding: 6px 16px; border: none; background: none; color: var(--text-dim); font-size: 13px; font-weight: 500; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+  .mode-btn.active { background: var(--accent); color: white; }
+  .model-chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+  .chip { padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; opacity: 0.4; user-select: none; }
+  .chip.selected { opacity: 1; }
+  .chip[data-model="claude"] { background: rgba(212,165,116,0.15); color: var(--claude); border-color: var(--claude); }
+  .chip[data-model="gpt"] { background: rgba(116,170,156,0.15); color: var(--gpt); border-color: var(--gpt); }
+  .chip[data-model="gemini"] { background: rgba(66,133,244,0.15); color: var(--gemini); border-color: var(--gemini); }
+  .chip[data-model="qwen"] { background: rgba(255,107,53,0.15); color: var(--qwen); border-color: var(--qwen); }
+  .chip[data-model="llama"] { background: rgba(168,85,247,0.15); color: var(--llama); border-color: var(--llama); }
+  .chip[data-model="mistral"] { background: rgba(249,115,22,0.15); color: var(--mistral); border-color: var(--mistral); }
+
+  /* Response area */
+  .response-area { flex: 1; overflow-y: auto; padding: 24px; }
+
+  /* Isolated mode panels */
+  .panels-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; position: relative; }
+  .panel-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  .panel-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .panel-name { font-size: 14px; font-weight: 600; }
+  .panel-meta { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+  .panel-body { padding: 16px; font-size: 14px; line-height: 1.7; color: var(--text); flex: 1; overflow-y: auto; }
+  .panel-body p { margin-bottom: 12px; }
+  .panel-body code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  .panel-footer { padding: 8px 16px; border-top: 1px solid var(--border); display: flex; gap: 12px; }
+  .panel-footer button { background: none; border: none; color: var(--text-dim); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
+  .panel-footer button:hover { background: var(--surface2); color: var(--text); }
+
+  /* Chat room mode */
+  .chatroom { max-width: 800px; margin: 0 auto; width: 100%; }
+  .chat-msg { display: flex; gap: 12px; margin-bottom: 20px; padding: 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+  .chat-avatar { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: white; flex-shrink: 0; }
+  .chat-content { flex: 1; }
+  .chat-sender { font-size: 13px; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .chat-sender .reply-tag { font-size: 11px; color: var(--text-dim); font-weight: 400; }
+  .chat-text { font-size: 14px; line-height: 1.7; }
+  .chat-msg.ref { border-left: 3px solid var(--accent); opacity: 0.85; }
+
+  /* Input area */
+  .input-area { padding: 16px 24px; border-top: 1px solid var(--border); background: var(--surface); }
+  .input-wrap { max-width: 800px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  .input-wrap textarea { flex: 1; padding: 12px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-size: 14px; font-family: inherit; resize: none; outline: none; min-height: 48px; max-height: 160px; }
+  .input-wrap textarea:focus { border-color: var(--accent); }
+  .input-wrap textarea::placeholder { color: var(--text-dim); }
+  .send-btn { width: 48px; height: 48px; background: var(--accent); border: none; border-radius: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s; flex-shrink: 0; }
+  .send-btn:hover { background: var(--accent-hover); }
+  .send-btn svg { width: 20px; height: 20px; fill: white; }
+
+  /* Empty state */
+  .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); }
+  .empty-state h2 { font-size: 24px; color: var(--text); margin-bottom: 8px; }
+  .empty-state p { font-size: 14px; max-width: 400px; text-align: center; line-height: 1.6; }
+  .empty-suggestions { display: flex; gap: 8px; margin-top: 24px; flex-wrap: wrap; justify-content: center; }
+  .suggestion { padding: 8px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; font-size: 13px; cursor: pointer; transition: all 0.15s; }
+  .suggestion:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Typing indicator */
+  .typing { display: inline-flex; gap: 4px; padding: 8px 0; }
+  .typing span { width: 6px; height: 6px; background: var(--text-dim); border-radius: 50%; animation: bounce 1.4s infinite; }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .panels-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Panels mode styles */
+  body.panels-mode .webview-container { display: none; }
+  body.panels-mode .response-area { padding: 0; }
+  body.panels-mode .chatroom { display: none; }
+  body.panels-mode .panels-grid { display: grid; position: absolute; left: -9999px; top: 0; right: 0; bottom: 0; width: 100%; height: 100%; z-index: 1000; }
+  body.panels-mode .panel { margin: 0; border-radius: 0; }
+</style>
 </head>
-<body>
-  <div class="header">
-    <div class="logo">AI Gateway</div>
-    <div class="tabs" id="tabs">
-      <!-- Search tab (first) -->
-      <button class="tab search-tab active" data-platform="search" onclick="switchTab('search')">
-        <span>🔍</span> Search
-      </button>
-      <!-- Platform tabs will be generated by JavaScript -->
+<body class="tabs-mode">
+<div class="app">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h1><span>AI Gateway</span></h1>
+      <p>Multi-LLM parallel inference</p>
     </div>
-    <div class="api-status" id="api-status">
-      <span class="dot"></span>
-      <span>API: localhost:<span id="api-port">8088</span></span>
+    <div class="search-box">
+      <input type="text" placeholder="Search conversations..." id="searchInput">
     </div>
-  </div>
-
-  <div class="webview-container" id="webview-container">
-    <!-- Search Panel (first/default) -->
-    <div class="search-panel active" id="search-panel">
-      <div class="search-header">
-        <h2>Unified Search</h2>
-        <div class="search-input-wrapper">
-          <input type="text" class="search-input" id="search-input" placeholder="Search across all AI conversations..." autofocus>
-          <button class="search-btn" onclick="performSearch()">Search</button>
-        </div>
-        <div class="search-filters">
-          <select class="filter-select" id="filter-platform">
-            <option value="">All Platforms</option>
-            <!-- Options will be populated by JavaScript -->
-          </select>
-          <select class="filter-select" id="filter-limit">
-            <option value="25">25 results</option>
-            <option value="50" selected>50 results</option>
-            <option value="100">100 results</option>
-          </select>
-        </div>
-        <div class="stats-bar" id="stats-bar">
-          <div class="stat">Conversations: <span class="stat-value" id="stat-conversations">0</span></div>
-          <div class="stat">Messages: <span class="stat-value" id="stat-messages">0</span></div>
-          <button class="sync-btn" onclick="syncAllContent()" title="Extract conversations from all open tabs">🔄 Sync All</button>
-          <span id="sync-status" style="color: #3fb950; margin-left: 12px;"></span>
-        </div>
-      </div>
-      <div class="search-results" id="search-results">
-        <div class="welcome-hint">
-          <h3>Welcome to AI Gateway</h3>
-          <p>Search across all your AI conversations, or click a platform tab above.</p>
-          <p>
-            <span class="keyboard-hint">Ctrl+1-9</span> Switch tabs
-            <span class="keyboard-hint">Ctrl+F</span> Search
-            <span class="keyboard-hint">Ctrl+R</span> Reload
-          </p>
-          <p style="margin-top: 16px;">
-            <strong>Tip:</strong> Right-click platform tabs to manage profiles
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <div class="loading-overlay" id="loading">
-      <div class="spinner"></div>
-      <span>Loading...</span>
-    </div>
-    <!-- WebViews will be generated by JavaScript -->
-  </div>
-
-  <!-- Profile Modal -->
-  <div class="modal-overlay" id="profile-modal">
-    <div class="modal">
-      <div class="modal-header" id="modal-header">Add Profile</div>
-      <input type="text" class="modal-input" id="modal-input" placeholder="Profile name">
-      <div class="modal-actions">
-        <button class="modal-btn modal-btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="modal-btn modal-btn-danger" id="modal-delete-btn" onclick="deleteProfile()" style="display:none">Delete</button>
-        <button class="modal-btn modal-btn-primary" id="modal-confirm-btn" onclick="confirmModal()">Create</button>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    // Platform configurations (will be loaded from main process)
-    let platforms = {};
-    let profiles = {};
-    let activeProfiles = {};
-    let activeTab = 'search';
-    let webviews = {}; // { platformId-profileId: webview }
-    let apiPort = 8088;
-    let currentDropdown = null;
-    let modalMode = 'create'; // 'create', 'rename', 'delete'
-    let modalPlatformId = null;
-    let modalProfileId = null;
-
-    // Initialize app
-    async function init() {
-      // Get platforms from main process
-      platforms = await window.aiGateway.getPlatforms();
-      apiPort = await window.aiGateway.getApiPort();
-
-      // Get profiles
-      const profileData = await window.aiGateway.getProfiles();
-      profiles = profileData.profiles;
-      activeProfiles = profileData.activeProfiles;
-
-      document.getElementById('api-port').textContent = apiPort;
-
-      // Populate platform filter
-      const filterSelect = document.getElementById('filter-platform');
-      Object.entries(platforms).forEach(([id, platform]) => {
-        const option = document.createElement('option');
-        option.value = id;
-        option.textContent = platform.name;
-        filterSelect.appendChild(option);
-      });
-
-      // Create tabs
-      const tabsContainer = document.getElementById('tabs');
-
-      Object.entries(platforms).forEach(([id, platform], index) => {
-        // Create tab
-        const tab = document.createElement('button');
-        tab.className = 'tab';
-        tab.dataset.platform = id;
-
-        const activeProfileId = activeProfiles[id] || 'default';
-        const activeProfileName = profiles[id]?.[activeProfileId]?.name || 'Default';
-        const profileCount = Object.keys(profiles[id] || {}).length;
-
-        tab.innerHTML = `
-          <span class="dot"></span>
-          <span class="platform-name">${platform.name}</span>
-          ${profileCount > 1 ? `<span class="profile-badge" title="${activeProfileName}">${activeProfileName}</span>` : ''}
-          ${profileCount > 1 ? '<span class="profile-arrow">▼</span>' : ''}
-        `;
-
-        tab.addEventListener('click', (e) => {
-          e.stopPropagation();
-          switchTab(id);
-        });
-
-        tab.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          showProfileDropdown(id, tab);
-        });
-
-        // Create profile dropdown
-        const dropdown = createProfileDropdown(id);
-        tab.appendChild(dropdown);
-
-        tabsContainer.appendChild(tab);
-
-        // Create webview for active profile
-        createWebview(id, activeProfileId);
-      });
-
-      // Close dropdowns when clicking elsewhere
-      document.addEventListener('click', () => {
-        closeAllDropdowns();
-      });
-
-      // Keyboard shortcuts
-      document.addEventListener('keydown', handleKeyboard);
-
-      // Search input enter key
-      document.getElementById('search-input').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          performSearch();
-        }
-      });
-
-      // Modal enter key
-      document.getElementById('modal-input').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          confirmModal();
-        }
-        if (e.key === 'Escape') {
-          closeModal();
-        }
-      });
-
-      // Load stats
-      loadStats();
-
-      // Session restore: Restore last active platform
-      const lastPlatform = await window.aiGateway.getLastActivePlatform();
-      if (lastPlatform && platforms[lastPlatform]) {
-        console.log('[Session] Restoring last active platform:', lastPlatform);
-        // Create the webview first
-        const lastProfileId = activeProfiles[lastPlatform] || 'default';
-        await createWebview(lastPlatform, lastProfileId);
-        // Then switch to that tab
-        switchTab(lastPlatform);
-      } else {
-        console.log('[Session] No last platform to restore, staying on search');
-      }
-    }
-
-    // Create profile dropdown for a platform
-    function createProfileDropdown(platformId) {
-      const dropdown = document.createElement('div');
-      dropdown.className = 'profile-dropdown';
-      dropdown.id = `dropdown-${platformId}`;
-      dropdown.addEventListener('click', (e) => e.stopPropagation());
-      updateProfileDropdown(platformId, dropdown);
-      return dropdown;
-    }
-
-    // Update profile dropdown content
-    function updateProfileDropdown(platformId, dropdown = null) {
-      if (!dropdown) {
-        dropdown = document.getElementById(`dropdown-${platformId}`);
-      }
-      if (!dropdown) return;
-
-      const platformProfiles = profiles[platformId] || {};
-      const activeProfileId = activeProfiles[platformId] || 'default';
-
-      dropdown.innerHTML = `
-        <div class="profile-dropdown-header">Profiles</div>
-        ${Object.entries(platformProfiles).map(([profileId, profile]) => `
-          <div class="profile-item ${profileId === activeProfileId ? 'active' : ''}"
-               onclick="selectProfile('${platformId}', '${profileId}')"
-               data-profile-id="${profileId}">
-            <span class="profile-name">${profile.name}</span>
-            <div class="profile-actions">
-              <button class="profile-action-btn" onclick="event.stopPropagation(); renameProfileModal('${platformId}', '${profileId}', '${profile.name}')" title="Rename">✏️</button>
-              ${profileId !== 'default' ? `<button class="profile-action-btn" onclick="event.stopPropagation(); deleteProfileModal('${platformId}', '${profileId}')" title="Delete">🗑️</button>` : ''}
-            </div>
+    <div class="history-list" id="historyList">
+      <div class="history-category">
+        <h3>Today</h3>
+        <div class="history-item active" onclick="loadConversation('demo')">
+          Compare code generation approaches
+          <div class="models-used">
+            <div class="dot" style="background:var(--claude)"></div>
+            <div class="dot" style="background:var(--gpt)"></div>
+            <div class="dot" style="background:var(--gemini)"></div>
           </div>
-        `).join('')}
-        <div class="profile-divider"></div>
-        <div class="profile-add-btn" onclick="addProfileModal('${platformId}')">
-          <span>➕</span> Add Profile
         </div>
-      `;
-    }
+      </div>
+    </div>
+    <button class="new-chat-btn" onclick="newChat()">+ New Conversation</button>
+  </div>
 
-    // Show profile dropdown
-    function showProfileDropdown(platformId, tab) {
-      closeAllDropdowns();
-      const dropdown = document.getElementById(`dropdown-${platformId}`);
-      if (dropdown) {
-        dropdown.classList.add('visible');
-        currentDropdown = dropdown;
-      }
-    }
+  <!-- Main content -->
+  <div class="main">
+    <div class="topbar">
+      <!-- Mode toggle for Tabs vs Panels -->
+      <div class="mode-toggle">
+        <button class="mode-btn active" onclick="setMode('tabs', this)">Tabs</button>
+        <button class="mode-btn" onclick="setMode('panels', this)">Panels</button>
+      </div>
+      <!-- Model selection chips -->
+      <div class="model-chips">
+        <div class="chip selected" data-model="claude" onclick="toggleChip(this)">Claude</div>
+        <div class="chip selected" data-model="gpt" onclick="toggleChip(this)">GPT-4o</div>
+        <div class="chip selected" data-model="gemini" onclick="toggleChip(this)">Gemini</div>
+        <div class="chip" data-model="qwen" onclick="toggleChip(this)">Qwen</div>
+        <div class="chip" data-model="llama" onclick="toggleChip(this)">Llama 3</div>
+        <div class="chip" data-model="mistral" onclick="toggleChip(this)">Mistral</div>
+      </div>
+    </div>
 
-    // Close all dropdowns
-    function closeAllDropdowns() {
-      document.querySelectorAll('.profile-dropdown').forEach(d => {
-        d.classList.remove('visible');
+    <!-- Response area -->
+    <div class="response-area" id="responseArea">
+      <!-- Isolated mode panels (default view) -->
+      <div class="panels-grid" id="isolatedView">
+        <!-- Panels will be dynamically generated based on selected models -->
+      </div>
+
+      <!-- Chat room mode -->
+      <div class="chatroom" id="chatroomView" style="display:none;">
+        <div class="empty-state">
+          <h2>Chat Room</h2>
+          <p>Select a model above and ask a question. Responses will appear in conversation format.</p>
+        </div>
+      </div>
+
+      <!-- Webviews container for injection -->
+      <div class="webview-container" id="webviewContainer" style="display:none;"></div>
+    </div>
+
+    <!-- Input -->
+    <div class="input-area">
+      <div class="input-wrap">
+        <textarea placeholder="Ask anything... responses appear from all selected models" rows="1" id="questionInput" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendQuestion()}"></textarea>
+        <button class="send-btn" onclick="sendQuestion()">
+          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentMode = 'tabs';
+  const API_BASE = window.location.origin;
+
+  const MODEL_COLORS = { claude: 'var(--claude)', gpt: 'var(--gpt)', gemini: 'var(--gemini)', qwen: 'var(--qwen)', llama: 'var(--llama)', mistral: 'var(--mistral)' };
+  const MODEL_NAMES = { claude: 'Claude', gpt: 'GPT-4o', gemini: 'Gemini', qwen: 'Qwen', llama: 'Llama 3', mistral: 'Mistral' };
+  const MODEL_INITIALS = { claude: 'C', gpt: 'G', gemini: 'Ge', qwen: 'Q', llama: 'L', mistral: 'M' };
+
+  // Escape HTML to prevent XSS
+  function esc(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  // Convert basic markdown-like text to HTML paragraphs
+  function formatResponse(text) {
+    if (!text) return '';
+    return text.split('\n\n').map(p => {
+      let html = esc(p).replace(/`([^`]+)`/g, '<code>$1</code>');
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      return `<p>${html}</p>`;
+    }).join('');
+  }
+
+  function setMode(mode, btn) {
+    currentMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const body = document.body;
+    if (mode === 'tabs') {
+      body.classList.remove('panels-mode');
+      body.classList.add('tabs-mode');
+    } else {
+      body.classList.remove('tabs-mode');
+      body.classList.add('panels-mode');
+    }
+  }
+
+  function toggleChip(el) {
+    el.classList.toggle('selected');
+  }
+
+  // Get selected models
+  function getSelectedModels() {
+    return [...document.querySelectorAll('.chip.selected')].map(c => c.dataset.model);
+  }
+
+  // Generate panel HTML for a model
+  function createPanelHTML(model) {
+    const color = MODEL_COLORS[model];
+    const name = MODEL_NAMES[model];
+    const initials = MODEL_INITIALS[model];
+    return `
+      <div class="panel" data-model="${model}">
+        <div class="panel-header">
+          <div class="panel-dot" style="background:${color}"></div>
+          <span class="panel-name">${name}</span>
+          <span class="panel-meta">loading...</span>
+        </div>
+        <div class="panel-body" data-model="${model}"><div class="typing"><span></span><span></span><span></span></div></div>
+        <div class="panel-footer">
+          <button onclick="copyPanel('${model}')">Copy</button>
+          <button onclick="expandPanel('${model}')">Expand</button>
+        </div>`;
+  }
+
+  // Generate chatroom message HTML for a model
+  function createChatMsgHTML(model, replyTo = null) {
+    const color = MODEL_COLORS[model];
+    const name = MODEL_NAMES[model];
+    const initials = MODEL_INITIALS[model];
+    const replyTag = replyTo ? `<span class="reply-tag">replying to ${MODEL_NAMES[replyTo]}</span>` : '';
+    return `
+      <div class="chat-msg" data-model="${model}" style="${replyTo ? 'border-left: 3px solid var(--accent); opacity: 0.85;' : ''}">
+        <div class="chat-avatar" style="background: ${color}">${initials}</div>
+        <div class="chat-content">
+          <div class="chat-sender" style="color:${color}">${name} ${replyTag}</div>
+          <div class="chat-text"><div class="typing"><span></span><span></span><span></span></div></div>
+        </div>`;
+  }
+
+  // Isolated mode: create panels for selected models
+  function runIsolated(models) {
+    const grid = document.getElementById('isolatedView');
+    grid.innerHTML = '';
+    
+    models.forEach(m => {
+      const panel = document.createElement('div');
+      panel.className = 'panel';
+      panel.dataset.model = m;
+      panel.innerHTML = createPanelHTML(m);
+      grid.appendChild(panel);
+    });
+  }
+
+  // Chatroom mode: create chat messages for selected models
+  function runChatroom(models) {
+    const room = document.getElementById('chatroomView');
+    
+    // Clear and rebuild
+    room.innerHTML = '';
+    
+    if (models.length > 0) {
+      models.forEach((m, i) => {
+        const msg = document.createElement('div');
+        msg.className = 'chat-msg';
+        msg.dataset.model = m;
+        msg.innerHTML = createChatMsgHTML(m, i > 0 ? models[i-1] : null);
+        room.appendChild(msg);
       });
-      currentDropdown = null;
+    } else {
+      room.innerHTML = '<div class="empty-state"><h2>Chat Room</h2><p>Select a model above and ask a question.</p></div>';
     }
+  }
 
-    // Select a profile
-    async function selectProfile(platformId, profileId) {
-      closeAllDropdowns();
+  // Send question handler
+  function sendQuestion() {
+    const input = document.getElementById('questionInput');
+    const q = input.value.trim();
+    if (!q) return;
+    input.value = '';
+    input.style.height = 'auto';
 
-      if (activeProfiles[platformId] === profileId) {
-        // Already active, just switch to tab
-        switchTab(platformId);
-        return;
-      }
+    const selected = getSelectedModels();
+    if (selected.length === 0) { alert('Select at least one model'); return; }
 
-      // Update active profile
-      await window.aiGateway.setActiveProfile(platformId, profileId);
-      activeProfiles[platformId] = profileId;
-
-      // Remove old webview for this platform
-      const webviewContainer = document.getElementById('webview-container');
-      Object.keys(webviews).forEach(key => {
-        if (key.startsWith(`${platformId}-`)) {
-          webviews[key].remove();
-          delete webviews[key];
-        }
-      });
-
-      // Create new webview with new partition
-      createWebview(platformId, profileId);
-
-      // Update tab UI
-      updateTabUI(platformId);
-
-      // Switch to this tab
-      switchTab(platformId);
+    if (currentMode === 'isolated') {
+      runIsolated(selected);
+    } else {
+      runChatroom(selected);
     }
+  }
 
-    // Create a webview for platform+profile
-    async function createWebview(platformId, profileId) {
-      const key = `${platformId}-${profileId}`;
-      if (webviews[key]) return webviews[key];
-
-      const platform = platforms[platformId];
-      const partition = await window.aiGateway.getPartition(platformId, profileId);
-
-      const webview = document.createElement('webview');
-      webview.id = `webview-${key}`;
+  // Listen for unified responses
+  if (window.aiGateway && window.aiGateway.onUnifiedResponse) {
+    window.aiGateway.onUnifiedResponse(function(data) {
+      const { platform, content, tokens, durationMs, done } = data;
       
-      // Session restore: Try to use last saved URL, otherwise use default
-      const savedUrl = await window.aiGateway.getLastUrl(platformId, profileId);
-      webview.src = savedUrl || platform.url;
-      console.log(`[Session] Restoring ${platformId}: ${savedUrl ? 'saved URL' : 'default URL'}`);
-      webview.partition = partition;
-      webview.setAttribute('allowpopups', '');
-      webview.setAttribute('webpreferences', 'contextIsolation=yes, enableRemoteModule=false');
-      
-      // Enable crash handler
-      webview.addEventListener('crashed', (e) => {
-        console.error('[Crash]', platformId, 'webview crashed!');
-        alert('Webview crashed! Reloading...');
-        webview.reload();
-      });
-      
-      webview.addEventListener('render-process-gone', (e) => {
-        console.error('[RenderGone]', platformId, 'render process gone:', e.details);
-      });
+      if (currentMode === 'isolated') {
+        // Update isolated panel
+        const body = document.querySelector(`.panel-body[data-model="${platform}"]`);
+        const meta = document.querySelector(`.panel-meta[data-model="${platform}"]`);
+        if (!body || !meta) return;
 
-      // Get tab for loading indicator
-      const tab = document.querySelector(`.tab[data-platform="${platformId}"]`);
-
-      // Loading state
-      webview.addEventListener('did-start-loading', () => {
-        const dot = tab?.querySelector('.dot');
-        if (dot) dot.classList.add('loading');
-      });
-
-      webview.addEventListener('did-stop-loading', () => {
-        const dot = tab?.querySelector('.dot');
-        if (dot) dot.classList.remove('loading');
-
-        console.log(`[UI] Webview loaded for ${platformId}, will extract in 2s`);
-        // Extract content after page loads (with delay for dynamic content)
-        setTimeout(() => {
-          console.log(`[UI] Starting extraction for ${platformId}`);
-          extractContent(platformId, webview);
-        }, 2000);
-      });
-
-      // Also extract on SPA navigation (user navigates within the app)
-      webview.addEventListener('did-navigate-in-page', (e) => {
-        if (e.isMainFrame) {
-          console.log(`[UI] SPA navigation in ${platformId} to ${e.url}`);
-          setTimeout(() => extractContent(platformId, webview), 2000);
-          
-          // Session restore: Save current URL
-          window.aiGateway.saveLastUrl(platformId, profileId, e.url);
-          console.log(`[Session] Saved URL for ${platformId}: ${e.url.substring(0, 60)}...`);
-        }
-      });
-      
-      // Also save on main frame navigation
-      webview.addEventListener('did-navigate', (e) => {
-        window.aiGateway.saveLastUrl(platformId, profileId, e.url);
-        console.log(`[Session] Saved URL for ${platformId}: ${e.url.substring(0, 60)}...`);
-      });
-
-      // Context menu with Copy URL
-      console.log('[DEBUG] Setting up context-menu for', platformId);
-      webview.addEventListener('context-menu', (e) => {
-        e.preventDefault();
-        console.log('[DEBUG] Context menu triggered!', e.params);
-        window.aiGateway.showContextMenu({
-          linkURL: e.params.linkURL,
-          pageURL: webview.getURL()
-        });
-      });
-
-      // Error handling
-      webview.addEventListener('did-fail-load', (e) => {
-        console.error(`[${platformId}] Failed to load:`, e.errorDescription);
-      });
-
-      document.getElementById('webview-container').appendChild(webview);
-      webviews[key] = webview;
-
-      return webview;
-    }
-
-    // Update tab UI (badge, arrow)
-    function updateTabUI(platformId) {
-      const tab = document.querySelector(`.tab[data-platform="${platformId}"]`);
-      if (!tab) return;
-
-      const activeProfileId = activeProfiles[platformId] || 'default';
-      const activeProfileName = profiles[platformId]?.[activeProfileId]?.name || 'Default';
-      const profileCount = Object.keys(profiles[platformId] || {}).length;
-
-      // Update badge
-      let badge = tab.querySelector('.profile-badge');
-      let arrow = tab.querySelector('.profile-arrow');
-
-      if (profileCount > 1) {
-        if (!badge) {
-          badge = document.createElement('span');
-          badge.className = 'profile-badge';
-          const platformName = tab.querySelector('.platform-name');
-          platformName.after(badge);
-        }
-        badge.textContent = activeProfileName;
-        badge.title = activeProfileName;
-
-        if (!arrow) {
-          arrow = document.createElement('span');
-          arrow.className = 'profile-arrow';
-          arrow.textContent = '▼';
-          badge.after(arrow);
-        }
-      } else {
-        if (badge) badge.remove();
-        if (arrow) arrow.remove();
-      }
-
-      // Update dropdown
-      updateProfileDropdown(platformId);
-    }
-
-    // Modal functions
-    function addProfileModal(platformId) {
-      closeAllDropdowns();
-      modalMode = 'create';
-      modalPlatformId = platformId;
-      modalProfileId = null;
-
-      document.getElementById('modal-header').textContent = `Add Profile for ${platforms[platformId].name}`;
-      document.getElementById('modal-input').value = '';
-      document.getElementById('modal-input').placeholder = 'Profile name (e.g., Work, Personal)';
-      document.getElementById('modal-confirm-btn').textContent = 'Create';
-      document.getElementById('modal-delete-btn').style.display = 'none';
-      document.getElementById('profile-modal').classList.add('visible');
-      document.getElementById('modal-input').focus();
-    }
-
-    function renameProfileModal(platformId, profileId, currentName) {
-      closeAllDropdowns();
-      modalMode = 'rename';
-      modalPlatformId = platformId;
-      modalProfileId = profileId;
-
-      document.getElementById('modal-header').textContent = 'Rename Profile';
-      document.getElementById('modal-input').value = currentName;
-      document.getElementById('modal-input').placeholder = 'New name';
-      document.getElementById('modal-confirm-btn').textContent = 'Rename';
-      document.getElementById('modal-delete-btn').style.display = 'none';
-      document.getElementById('profile-modal').classList.add('visible');
-      document.getElementById('modal-input').focus();
-      document.getElementById('modal-input').select();
-    }
-
-    function deleteProfileModal(platformId, profileId) {
-      closeAllDropdowns();
-      modalMode = 'delete';
-      modalPlatformId = platformId;
-      modalProfileId = profileId;
-
-      const profileName = profiles[platformId]?.[profileId]?.name || profileId;
-
-      document.getElementById('modal-header').textContent = 'Delete Profile';
-      document.getElementById('modal-input').value = profileName;
-      document.getElementById('modal-input').disabled = true;
-      document.getElementById('modal-input').placeholder = '';
-      document.getElementById('modal-confirm-btn').style.display = 'none';
-      document.getElementById('modal-delete-btn').style.display = 'inline-block';
-      document.getElementById('profile-modal').classList.add('visible');
-    }
-
-    function closeModal() {
-      document.getElementById('profile-modal').classList.remove('visible');
-      document.getElementById('modal-input').disabled = false;
-      document.getElementById('modal-confirm-btn').style.display = 'inline-block';
-      modalMode = 'create';
-      modalPlatformId = null;
-      modalProfileId = null;
-    }
-
-    async function confirmModal() {
-      const input = document.getElementById('modal-input');
-      const name = input.value.trim();
-
-      if (modalMode === 'create') {
-        if (!name) return;
-        const result = await window.aiGateway.createProfile(modalPlatformId, name);
-        profiles[modalPlatformId][result.profileId] = result.profile;
-        updateTabUI(modalPlatformId);
-        closeModal();
-        // Optionally switch to new profile
-        selectProfile(modalPlatformId, result.profileId);
-      } else if (modalMode === 'rename') {
-        if (!name) return;
-        await window.aiGateway.renameProfile(modalPlatformId, modalProfileId, name);
-        profiles[modalPlatformId][modalProfileId].name = name;
-        updateTabUI(modalPlatformId);
-        closeModal();
-      }
-    }
-
-    async function deleteProfile() {
-      const result = await window.aiGateway.deleteProfile(modalPlatformId, modalProfileId);
-      if (result.success) {
-        delete profiles[modalPlatformId][modalProfileId];
-        updateTabUI(modalPlatformId);
-        closeModal();
-      } else {
-        alert(result.error);
-      }
-    }
-
-    // Extract content from webview
-    async function extractContent(platformId, webview) {
-      console.log(`[UI] extractContent called for ${platformId}`);
-      try {
-        // Get platform-specific extractor script
-        console.log(`[UI] Getting extractor for ${platformId}`);
-        const extractorScript = await window.aiGateway.getExtractor(platformId);
-        console.log(`[UI] Got extractor, length: ${extractorScript?.length}`);
-
-        // Execute in webview
-        console.log(`[UI] Executing extractor in webview for ${platformId}`);
-        let result;
-        try {
-          result = await webview.executeJavaScript(extractorScript);
-        } catch (execError) {
-          console.error(`[UI] executeJavaScript failed for ${platformId}:`, execError.message);
-          return;
-        }
-        console.log(`[UI] Extractor result for ${platformId}:`, result?.platform, result?.messages?.length || 0, 'messages');
-
-        if (result && result.messages && result.messages.length > 0) {
-          // Save to database
-          console.log(`[UI] Saving ${result.messages.length} messages to database`);
-          const saveResult = await window.aiGateway.saveExtractedContent({
-            platform: platformId,
-            messages: result.messages,
-            url: result.url
-          });
-
-          if (saveResult.success) {
-            console.log(`[UI] Saved ${saveResult.savedCount} messages from ${platformId}`);
-            loadStats(); // Refresh stats
-          } else {
-            console.error(`[UI] Save failed:`, saveResult.error);
+        if (done && content) {
+          const secs = ((durationMs || 0) / 1000).toFixed(1);
+          meta.textContent = `${secs}s · ${tokens || '?'} tokens`;
+          body.innerHTML = formatResponse(content);
+          body.dataset.rawText = content;
+        } else if (content) {
+          if (body.querySelector('.typing')) {
+            body.innerHTML = '';
           }
-        } else {
-          console.log(`[UI] No messages found for ${platformId}`);
+          body.innerHTML = formatResponse(content);
+          meta.textContent = 'generating...';
         }
-      } catch (error) {
-        console.error(`[UI] Extraction error for ${platformId}:`, error.message, error);
-      }
-    }
+      } else if (currentMode === 'chatroom') {
+        // Update chatroom message
+        const indicator = document.querySelector(`.chat-msg[data-model="${platform}"]`);
+        if (!indicator) return;
+        const textEl = indicator.querySelector('.chat-text');
 
-    // Sync all webviews (manual trigger)
-    async function syncAllContent() {
-      const statusEl = document.getElementById('sync-status');
-      statusEl.textContent = 'Syncing...';
-
-      let totalSaved = 0;
-      for (const [key, webview] of Object.entries(webviews)) {
-        const platformId = key.split('-')[0];
-        try {
-          const extractorScript = await window.aiGateway.getExtractor(platformId);
-          const result = await webview.executeJavaScript(extractorScript);
-
-          if (result && result.messages && result.messages.length > 0) {
-            const saveResult = await window.aiGateway.saveExtractedContent({
-              platform: platformId,
-              messages: result.messages,
-              url: result.url
-            });
-            if (saveResult.success) {
-              totalSaved += saveResult.savedCount;
-            }
-          }
-        } catch (e) {
-          console.error(`Sync error for ${platformId}:`, e.message);
-        }
-      }
-
-      statusEl.textContent = `Synced ${totalSaved} messages`;
-      setTimeout(() => { statusEl.textContent = ''; }, 3000);
-      loadStats();
-    }
-
-    // Load statistics
-    async function loadStats() {
-      try {
-        const response = await fetch(`http://localhost:${apiPort}/stats`);
-        const stats = await response.json();
-        document.getElementById('stat-conversations').textContent = stats.totalConversations;
-        document.getElementById('stat-messages').textContent = stats.totalMessages;
-      } catch (error) {
-        console.error('Failed to load stats:', error);
-      }
-    }
-
-    // Perform search
-    async function performSearch() {
-      const query = document.getElementById('search-input').value.trim();
-      if (!query) return;
-
-      const platform = document.getElementById('filter-platform').value;
-      const limit = document.getElementById('filter-limit').value;
-
-      const resultsContainer = document.getElementById('search-results');
-      resultsContainer.innerHTML = '<div class="no-results">Searching...</div>';
-
-      try {
-        let url = `http://localhost:${apiPort}/search?q=${encodeURIComponent(query)}&limit=${limit}`;
-        if (platform) {
-          url += `&platform=${platform}`;
+        if (done && content) {
+          textEl.innerHTML = formatResponse(content);
+        } else if (content) {
+          if (textEl.querySelector('.typing')) textEl.innerHTML = '';
+          textEl.innerHTML = formatResponse(content);
         }
 
-        const response = await fetch(url);
-        const data = await response.json();
-
-        if (data.results && data.results.length > 0) {
-          resultsContainer.innerHTML = data.results.map(result => `
-            <div class="result-item">
-              <div class="result-header">
-                <span class="result-platform">${result.platform}</span>
-                <span class="result-role">${result.role}</span>
-                <span class="result-time">${result.timestamp}</span>
-              </div>
-              <div class="result-content">${result.highlighted || result.content}</div>
-            </div>
-          `).join('');
-        } else {
-          resultsContainer.innerHTML = '<div class="no-results">No results found</div>';
-        }
-      } catch (error) {
-        resultsContainer.innerHTML = `<div class="no-results">Search error: ${error.message}</div>`;
-      }
-    }
-
-    // Switch to a tab
-    function switchTab(platformId) {
-      closeAllDropdowns();
-
-      // Update tabs
-      document.querySelectorAll('.tab').forEach(tab => {
-        tab.classList.toggle('active', tab.dataset.platform === platformId);
-      });
-
-      // Hide all content
-      document.getElementById('search-panel').classList.remove('active');
-      Object.values(webviews).forEach(wv => wv.classList.remove('active'));
-
-      // Show appropriate content
-      if (platformId === 'search') {
-        document.getElementById('search-panel').classList.add('active');
-        document.getElementById('search-input').focus();
-        loadStats(); // Refresh stats when going to search
-      } else {
-        const activeProfileId = activeProfiles[platformId] || 'default';
-        const key = `${platformId}-${activeProfileId}`;
-        if (webviews[key]) {
-          webviews[key].classList.add('active');
-          // Auto-extract when switching to a platform tab
-          console.log(`[UI] Tab switch to ${platformId}, triggering extraction`);
-          setTimeout(() => extractContent(platformId, webviews[key]), 500);
-        }
-      }
-
-      activeTab = platformId;
-
-      // Session restore: Save last active platform
-      if (platformId !== 'search') {
-        window.aiGateway.saveLastActivePlatform(platformId);
-      }
-    }
-
-    // Keyboard shortcuts
-    function handleKeyboard(e) {
-      // Escape: Close modal/dropdown
-      if (e.key === 'Escape') {
-        closeAllDropdowns();
-        closeModal();
-        return;
-      }
-
-      // Ctrl+F: Focus search
-      if (e.ctrlKey && e.key === 'f') {
-        switchTab('search');
-        e.preventDefault();
-        return;
-      }
-
-      // Ctrl+1-9: Switch tabs (1 = search, 2+ = platforms)
-      if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
-        const index = parseInt(e.key) - 1;
-        if (index === 0) {
-          switchTab('search');
-        } else {
-          const platformIds = Object.keys(platforms);
-          if (index - 1 < platformIds.length) {
-            switchTab(platformIds[index - 1]);
-          }
-        }
-        e.preventDefault();
-      }
-
-      // Ctrl+Tab: Next tab
-      if (e.ctrlKey && e.key === 'Tab' && !e.shiftKey) {
-        const allIds = ['search', ...Object.keys(platforms)];
-        const currentIndex = allIds.indexOf(activeTab);
-        const nextIndex = (currentIndex + 1) % allIds.length;
-        switchTab(allIds[nextIndex]);
-        e.preventDefault();
-      }
-
-      // Ctrl+Shift+Tab: Previous tab
-      if (e.ctrlKey && e.shiftKey && e.key === 'Tab') {
-        const allIds = ['search', ...Object.keys(platforms)];
-        const currentIndex = allIds.indexOf(activeTab);
-        const prevIndex = (currentIndex - 1 + allIds.length) % allIds.length;
-        switchTab(allIds[prevIndex]);
-        e.preventDefault();
-      }
-
-      // Ctrl+R: Reload current tab
-      if (e.ctrlKey && e.key === 'r' && activeTab && activeTab !== 'search') {
-        const activeProfileId = activeProfiles[activeTab] || 'default';
-        const key = `${activeTab}-${activeProfileId}`;
-        if (webviews[key]) {
-          webviews[key].reload();
-        }
-        e.preventDefault();
-      }
-    }
-
-    // Handle image generation requests from API
-    window.aiGateway.onGenerateImage(async (data) => {
-      console.log('[ImageGen] Received request:', data.prompt);
-
-      try {
-        // Use the main 'grok' platform (Imagine is a tab within it)
-        const platformId = 'grok';
-        if (!platforms[platformId]) {
-          window.aiGateway.sendImageResult({ success: false, error: 'Grok platform not found' });
-          return;
-        }
-
-        // Ensure webview exists
-        const activeProfileId = activeProfiles[platformId] || 'default';
-        const key = `${platformId}-${activeProfileId}`;
-        let webview = webviews[key];
-
-        if (!webview) {
-          // Create webview if it doesn't exist
-          await createWebview(platformId, activeProfileId);
-          webview = webviews[key];
-          // Wait for page to load
-          await new Promise(resolve => setTimeout(resolve, 5000));
-        }
-
-        // Switch to the tab
-        switchTab(platformId);
-
-        // Wait a bit for tab switch
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Step 1: First navigate to Imagine tab within Grok
-        const navigateToImagineScript = `
-          (function() {
-            try {
-              // Look for Imagine tab/button/link in Grok interface
-              const allElements = document.querySelectorAll('a, button, [role="tab"], [role="button"], nav a, nav button');
-              let imagineTab = null;
-
-              for (const el of allElements) {
-                const text = (el.innerText || el.textContent || '').toLowerCase();
-                const href = el.getAttribute('href') || '';
-                const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-
-                if (text.includes('imagine') || href.includes('imagine') || ariaLabel.includes('imagine')) {
-                  imagineTab = el;
-                  break;
-                }
-              }
-
-              if (imagineTab) {
-                imagineTab.click();
-                return { success: true, message: 'Navigated to Imagine tab', found: true };
-              } else {
-                // Check if we're already on Imagine page
-                const url = window.location.href;
-                if (url.includes('imagine')) {
-                  return { success: true, message: 'Already on Imagine page', found: true };
-                }
-
-                // List all clickable elements for debugging
-                const clickables = Array.from(allElements).slice(0, 10).map(el => ({
-                  tag: el.tagName,
-                  text: (el.innerText || '').substring(0, 30),
-                  href: el.getAttribute('href'),
-                  class: el.className?.substring?.(0, 50)
-                }));
-
-                return { success: false, error: 'Could not find Imagine tab', debug: { clickables, url } };
-              }
-            } catch (e) {
-              return { success: false, error: e.message };
-            }
-          })();
-        `;
-
-        // Try to navigate to Imagine tab first
-        console.log('[ImageGen] Navigating to Imagine tab...');
-        const navResult = await webview.executeJavaScript(navigateToImagineScript);
-        console.log('[ImageGen] Navigation result:', navResult);
-
-        if (!navResult.success) {
-          window.aiGateway.sendImageResult(navResult);
-          return;
-        }
-
-        // Wait for Imagine tab to load
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Step 2: Now type prompt and generate
-        const generateScript = `
-          (function() {
-            try {
-              // Debug: collect page info
-              const url = window.location.href;
-              const allInputs = document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]');
-              const inputInfo = Array.from(allInputs).map(el => ({
-                tag: el.tagName,
-                id: el.id,
-                class: (el.className || '').substring(0, 50),
-                placeholder: el.placeholder,
-                visible: el.offsetWidth > 0
-              }));
-
-              // Find prompt input - try multiple strategies
-              let promptInput = null;
-
-              // Strategy 1: Look for contenteditable div (common in modern chat UIs)
-              const editables = document.querySelectorAll('[contenteditable="true"]');
-              for (const ed of editables) {
-                if (ed.offsetWidth > 100) {  // Must be visible and reasonably sized
-                  promptInput = ed;
-                  break;
-                }
-              }
-
-              // Strategy 2: Textarea
-              if (!promptInput) {
-                const textareas = document.querySelectorAll('textarea');
-                for (const ta of textareas) {
-                  if (ta.offsetWidth > 100) {
-                    promptInput = ta;
-                    break;
-                  }
-                }
-              }
-
-              // Strategy 3: Any visible text input
-              if (!promptInput) {
-                const inputs = document.querySelectorAll('input[type="text"]');
-                for (const input of inputs) {
-                  if (input.offsetWidth > 100) {
-                    promptInput = input;
-                    break;
-                  }
-                }
-              }
-
-              if (!promptInput) {
-                return {
-                  success: false,
-                  error: 'Could not find prompt input on Imagine page',
-                  debug: { url, inputCount: allInputs.length, inputs: inputInfo.slice(0, 5) }
-                };
-              }
-
-              // Clear and type prompt
-              promptInput.focus();
-
-              if (promptInput.contentEditable === 'true') {
-                promptInput.innerText = ${JSON.stringify(data.prompt)};
-                promptInput.dispatchEvent(new Event('input', { bubbles: true }));
-              } else {
-                promptInput.value = ${JSON.stringify(data.prompt)};
-                promptInput.dispatchEvent(new Event('input', { bubbles: true }));
-                promptInput.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-
-              // Small delay for input to register (synchronous)
-
-              // Find and click generate button
-              const allButtons = document.querySelectorAll('button, [role="button"]');
-              let generateBtn = null;
-
-              for (const btn of allButtons) {
-                if (btn.offsetWidth < 20) continue; // Skip tiny buttons
-
-                const text = (btn.innerText || btn.textContent || '').toLowerCase();
-                const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
-
-                if (text.includes('generate') || text.includes('imagine') || text.includes('create') ||
-                    ariaLabel.includes('generate') || ariaLabel.includes('imagine')) {
-                  generateBtn = btn;
-                  break;
-                }
-              }
-
-              // Try submit or send button
-              if (!generateBtn) {
-                for (const btn of allButtons) {
-                  const text = (btn.innerText || '').toLowerCase();
-                  if (text.includes('submit') || text.includes('send')) {
-                    generateBtn = btn;
-                    break;
-                  }
-                }
-              }
-
-              if (generateBtn) {
-                generateBtn.click();
-                return { success: true, message: 'Prompt submitted via button' };
-              } else {
-                // Try Enter key
-                promptInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
-                return { success: true, message: 'Prompt submitted via Enter' };
-              }
-            } catch (e) {
-              return { success: false, error: e.message };
-            }
-          })();
-        `;
-
-        const submitResult = await webview.executeJavaScript(generateScript);
-        console.log('[ImageGen] Submit result:', submitResult);
-
-        if (!submitResult.success) {
-          window.aiGateway.sendImageResult(submitResult);
-          return;
-        }
-
-        // Wait for image generation (poll for images)
-        let attempts = 0;
-        const maxAttempts = 30; // 30 seconds max
-
-        const pollForImages = async () => {
-          // Use grok-imagine extractor (it looks for large images)
-          const extractorScript = await window.aiGateway.getExtractor('grok-imagine');
-          const result = await webview.executeJavaScript(extractorScript);
-
-          console.log('[ImageGen] Poll attempt', attempts, '- found', result.images?.length || 0, 'images');
-
-          if (result.images && result.images.length > 0) {
-            window.aiGateway.sendImageResult({
-              success: true,
-              images: result.images,
-              prompt: data.prompt
-            });
-            return;
-          }
-
-          attempts++;
-          if (attempts < maxAttempts) {
-            setTimeout(pollForImages, 1000);
-          } else {
-            window.aiGateway.sendImageResult({
-              success: false,
-              error: 'Timeout waiting for image generation (30s)',
-              prompt: data.prompt
-            });
-          }
-        };
-
-        // Start polling after 5 seconds (give time for generation to start)
-        setTimeout(pollForImages, 5000);
-
-      } catch (error) {
-        console.error('[ImageGen] Error:', error);
-        window.aiGateway.sendImageResult({ success: false, error: error.message });
+        const room = document.getElementById('chatroomView');
+        if (room) room.scrollTop = room.scrollHeight;
       }
     });
+  }
 
-    // Initialize on load
-    init();
-  </script>
+  // Copy panel content
+  function copyPanel(model) {
+    const body = document.querySelector(`.panel-body[data-model="${model}"]`);
+    const text = body?.dataset?.rawText || body?.textContent || '';
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = event.target;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1500);
+    });
+  }
+
+  // Expand panel (toggle full width)
+  function expandPanel(model) {
+    const panel = event.target.closest('.panel');
+    const grid = document.getElementById('isolatedView');
+    if (panel.style.gridColumn === '1 / -1') {
+      panel.style.gridColumn = '';
+      event.target.textContent = 'Expand';
+    } else {
+      panel.style.gridColumn = '1 / -1';
+      event.target.textContent = 'Collapse';
+    }
+  }
+
+  function loadConversation(id) {
+    document.querySelectorAll('.history-item').forEach(i => i.classList.remove('active'));
+    event.target.closest('.history-item').classList.add('active');
+  }
+
+  function newChat() {
+    document.querySelectorAll('.history-item').forEach(i => i.classList.remove('active'));
+    if (currentMode === 'isolated') {
+      document.getElementById('isolatedView').innerHTML = `
+        <div class="empty-state">
+          <h2>Ask anything</h2>
+          <p>Select your models above and ask a question. Responses will appear side by side for easy comparison.</p>
+          <div class="empty-suggestions">
+            <div class="suggestion" onclick="document.getElementById('questionInput').value=this.textContent;sendQuestion()">Compare sorting algorithms</div>
+            <div class="suggestion" onclick="document.getElementById('questionInput').value=this.textContent;sendQuestion()">Write a marketing email</div>
+            <div class="suggestion" onclick="document.getElementById('questionInput').value=this.textContent;sendQuestion()">Explain quantum computing</div>
+          </div>
+        </div>`;
+    } else {
+      document.getElementById('chatroomView').innerHTML = '<div class="empty-state"><h2>Chat Room</h2><p>Select a model above and ask a question.</p></div>';
+    }
+  }
+
+  // Auto-resize textarea
+  document.getElementById('questionInput').addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+  });
+
+  // ── WEBVIEW MANAGEMENT (from v1) ──
+  let platforms = {};
+  let webviews = {};
+
+  async function initWebviews() {
+    if (!window.aiGateway) return;
+    platforms = await window.aiGateway.getPlatforms();
+    const { profiles, activeProfiles } = await window.aiGateway.getProfiles();
+    const container = document.getElementById('webviewContainer');
+
+    for (const [platformId, platform] of Object.entries(platforms)) {
+      const profileId = activeProfiles[platformId] || 'default';
+      await createWebview(platformId, profileId, platform, container);
+    }
+    console.log('[v2] All webviews created:', Object.keys(webviews).join(', '));
+  }
+
+  async function createWebview(platformId, profileId, platform, container) {
+    const key = `${platformId}-${profileId}`;
+    if (webviews[key]) return webviews[key];
+
+    const partition = await window.aiGateway.getPartition(platformId, profileId);
+    const webview = document.createElement('webview');
+    webview.id = `webview-${key}`;
+    webview.dataset.platform = platformId;
+
+    const savedUrl = await window.aiGateway.getLastUrl(platformId, profileId);
+    webview.src = savedUrl || platform.url;
+    webview.partition = partition;
+    webview.setAttribute('allowpopups', '');
+    webview.setAttribute('webpreferences', 'contextIsolation=yes, enableRemoteModule=false');
+    webview.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:800px;';
+
+    webview.addEventListener('did-stop-loading', () => {
+      console.log(`[v2] ${platformId} loaded`);
+    });
+
+    container.appendChild(webview);
+    webviews[key] = webview;
+    return webview;
+  }
+
+  // ── UNIFIED INJECT (sends prompt to all selected webviews) ──
+  function getInjectorScript(platform, message) {
+    const escaped = JSON.stringify(message);
+    const injectors = {
+      chatgpt: `(async()=>{try{const t=document.querySelector('textarea[id="prompt-textarea"]');if(!t)return{success:false,error:'no input'};t.focus();Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(t,${escaped});t.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(r=>setTimeout(r,300));const b=document.querySelector('button[data-testid="send-button"]');if(b&&!b.disabled){b.click();return{success:true}}t.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));return{success:true}}catch(e){return{success:false,error:e.message}}})()`,
+      claude: `(async()=>{try{const e=document.querySelector('div[contenteditable="true"]');if(!e)return{success:false,error:'no editor'};e.focus();e.innerHTML='';const p=document.createElement('p');p.textContent=${escaped};e.appendChild(p);e.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(r=>setTimeout(r,300));const b=document.querySelector('button[aria-label="Send Message"]');if(b&&!b.disabled){b.click();return{success:true}}e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));return{success:true}}catch(e){return{success:false,error:e.message}}})()`,
+      gemini: `(async()=>{try{const e=document.querySelector('.ql-editor,[contenteditable="true"]');if(!e)return{success:false,error:'no editor'};e.focus();e.innerHTML='<p>'+${escaped}+'</p>';e.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(r=>setTimeout(r,300));const b=document.querySelector('button[aria-label="Send message"]');if(b&&!b.disabled){b.click();return{success:true}}e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));return{success:true}}catch(e){return{success:false,error:e.message}}})()`,
+    };
+    const generic = `(async()=>{try{let i=document.querySelector('textarea:not([readonly])');if(!i)i=document.querySelector('[contenteditable="true"]');if(!i)return{success:false,error:'no input'};i.focus();if(i.tagName==='TEXTAREA'){Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(i,${escaped});i.dispatchEvent(new Event('input',{bubbles:true}))}else{i.innerText=${escaped};i.dispatchEvent(new Event('input',{bubbles:true}))}await new Promise(r=>setTimeout(r,300));for(const s of['button[aria-label*="send" i]','button[aria-label*="submit" i]','button[class*="send" i]','button[type="submit"]']){const b=document.querySelector(s);if(b&&!b.disabled){b.click();return{success:true}}}i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));return{success:true}}catch(e){return{success:false,error:e.message}}})()`;
+    return injectors[platform] || generic;
+  }
+
+  function getExtractorScript(platform) {
+    const extractors = {
+      chatgpt: `(()=>{const m=document.querySelectorAll('[data-message-author-role="assistant"]');if(!m.length)return{content:'',done:false};const l=m[m.length-1];const c=l.innerText||'';const s=document.querySelector('button[data-testid="stop-button"]');return{content:c,done:!s&&c.length>0}})()`,
+      claude: `(()=>{const m=document.querySelectorAll('.font-claude-message,[class*="message-content"]');if(!m.length)return{content:'',done:false};const l=m[m.length-1];const c=l.innerText||'';const s=document.querySelector('[data-is-streaming="true"]');return{content:c,done:!s&&c.length>0}})()`,
+      gemini: `(()=>{const m=document.querySelectorAll('model-response,[class*="response-content"]');if(!m.length)return{content:'',done:false};const l=m[m.length-1];const c=l.innerText||'';const s=document.querySelector('mat-progress-bar,.loading-indicator');return{content:c,done:!s&&c.length>0}})()`,
+    };
+    const generic = `(()=>{const m=document.querySelectorAll('[class*="message"],[class*="response"],[class*="answer"]');if(!m.length)return{content:'',done:false};const l=m[m.length-1];const c=l.innerText||'';return{content:c,done:c.length>0}})()`;
+    return extractors[platform] || generic;
+  }
+
+  // Override sendQuestion to use webview injection
+  const _origSendQuestion = sendQuestion;
+  sendQuestion = async function() {
+    const input = document.getElementById('questionInput');
+    const q = input.value.trim();
+    if (!q) return;
+    input.value = '';
+    input.style.height = 'auto';
+
+    const selected = getSelectedModels();
+    if (selected.length === 0) { alert('Select at least one model'); return; }
+
+    // Create UI panels/messages
+    if (currentMode === 'tabs') {
+      runIsolated(selected);
+    } else {
+      runChatroom(selected);
+    }
+
+    // Inject into webviews
+    for (const platform of selected) {
+      const wv = document.querySelector(`webview[data-platform="${platform}"]`);
+      if (!wv) { console.log(`[v2] No webview for ${platform}`); continue; }
+
+      try {
+        const script = getInjectorScript(platform, q);
+        const result = await wv.executeJavaScript(script);
+        console.log(`[v2] Inject ${platform}:`, result);
+
+        if (result && result.success) {
+          startResponsePolling(platform, wv);
+        }
+      } catch (e) {
+        console.error(`[v2] Inject error ${platform}:`, e);
+      }
+    }
+  };
+
+  function startResponsePolling(platform, webview) {
+    let lastContent = '';
+    let tokenCount = 0;
+    const startTime = Date.now();
+    const script = getExtractorScript(platform);
+
+    const poll = setInterval(async () => {
+      try {
+        const result = await webview.executeJavaScript(script);
+        if (!result || !result.content) return;
+
+        if (result.content !== lastContent) {
+          lastContent = result.content;
+          tokenCount = result.content.split(/\s+/).length;
+
+          updatePanel(platform, lastContent, tokenCount, Date.now() - startTime, false);
+        }
+
+        if (result.done && lastContent.length > 0) {
+          clearInterval(poll);
+          updatePanel(platform, lastContent, tokenCount, Date.now() - startTime, true);
+        }
+      } catch (e) { /* transient */ }
+    }, 500);
+
+    setTimeout(() => {
+      clearInterval(poll);
+      if (lastContent) updatePanel(platform, lastContent, tokenCount, Date.now() - startTime, true);
+    }, 120000);
+  }
+
+  function updatePanel(platform, content, tokens, durationMs, done) {
+    if (currentMode === 'tabs' || currentMode === 'isolated') {
+      const body = document.querySelector(`.panel-body[data-model="${platform}"]`);
+      const meta = document.querySelector(`.panel[data-model="${platform}"] .panel-meta`);
+      if (!body) return;
+      if (done) {
+        if (meta) meta.textContent = `${(durationMs/1000).toFixed(1)}s \u00b7 ${tokens} tokens`;
+        body.innerHTML = formatResponse(content);
+        body.dataset.rawText = content;
+      } else {
+        if (body.querySelector('.typing')) body.innerHTML = '';
+        body.innerHTML = formatResponse(content);
+        if (meta) meta.textContent = 'generating...';
+      }
+    } else {
+      const msg = document.querySelector(`.chat-msg[data-model="${platform}"]`);
+      if (!msg) return;
+      const textEl = msg.querySelector('.chat-text');
+      if (done && content) textEl.innerHTML = formatResponse(content);
+      else if (content) {
+        if (textEl.querySelector('.typing')) textEl.innerHTML = '';
+        textEl.innerHTML = formatResponse(content);
+      }
+    }
+  }
+
+  // Initialize webviews on load
+  initWebviews();
+
+  // Initialize mode from localStorage if available
+  const savedMode = localStorage.getItem('aiGatewayMode');
+  if (savedMode === 'panels') {
+    setMode('panels', document.querySelector('.mode-btn:nth-child(2)'));
+  }
+</script>
 </body>
 </html>

@@ -1,0 +1,16 @@
+{
+  "name": "ai-gateway",
+  "version": "2.0.0",
+  "description": "AI Gateway - Unified interface for multiple AI providers",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": ["ai", "gateway", "chatgpt", "claude"],
+  "author": "Valent",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  }
+}

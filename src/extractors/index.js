@@ -54,41 +54,49 @@ const claudeExtractor = `
 // ChatGPT extractor
 const chatgptExtractor = `
 (function() {
-  const messages = [];
+  try {
+    const messages = [];
 
-  // ChatGPT uses data-message-author-role attribute
-  const messageEls = document.querySelectorAll('[data-message-author-role]');
+    // ChatGPT uses data-message-author-role attribute
+    const messageEls = document.querySelectorAll('[data-message-author-role]');
 
-  messageEls.forEach(el => {
-    const role = el.getAttribute('data-message-author-role');
-    const contentEl = el.querySelector('.markdown, .prose, [class*="markdown"]') || el;
-    const text = contentEl.innerText?.trim();
+    messageEls.forEach(el => {
+      try {
+        const role = el.getAttribute('data-message-author-role');
+        const contentEl = el.querySelector('.markdown, .prose, [class*="markdown"]') || el;
+        const text = contentEl.innerText?.trim();
 
-    if (text && text.length > 5) {
-      messages.push({
-        role: role === 'user' ? 'user' : 'assistant',
-        content: text.substring(0, 10000),
-        timestamp: new Date().toISOString()
+        if (text && text.length > 5) {
+          messages.push({
+            role: role === 'user' ? 'user' : 'assistant',
+            content: text.substring(0, 10000),
+            timestamp: new Date().toISOString()
+          });
+        }
+      } catch (e) {}
+    });
+
+    // Fallback for older UI
+    if (messages.length === 0) {
+      const turns = document.querySelectorAll('[class*="ConversationItem"], [class*="turn"]');
+      turns.forEach((el, i) => {
+        try {
+          const text = el.innerText?.trim();
+          if (text && text.length > 10) {
+            messages.push({
+              role: i % 2 === 0 ? 'user' : 'assistant',
+              content: text.substring(0, 10000),
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (e) {}
       });
     }
-  });
 
-  // Fallback for older UI
-  if (messages.length === 0) {
-    const turns = document.querySelectorAll('[class*="ConversationItem"], [class*="turn"]');
-    turns.forEach((el, i) => {
-      const text = el.innerText?.trim();
-      if (text && text.length > 10) {
-        messages.push({
-          role: i % 2 === 0 ? 'user' : 'assistant',
-          content: text.substring(0, 10000),
-          timestamp: new Date().toISOString()
-        });
-      }
-    });
+    return { platform: 'chatgpt', messages, url: window.location.href, debug: { messageCount: messages.length } };
+  } catch (e) {
+    return { platform: 'chatgpt', messages: [], url: window.location.href, error: e.message };
   }
-
-  return { platform: 'chatgpt', messages, url: window.location.href };
 })();
 `;
 
@@ -143,76 +151,118 @@ const geminiExtractor = `
 // Perplexity extractor
 const perplexityExtractor = `
 (function() {
-  const messages = [];
+  try {
+    const messages = [];
+    const url = window.location.href;
+    const seenContent = new Set();
 
-  // Perplexity query/answer pairs
-  const queries = document.querySelectorAll('[class*="query"], [class*="question"], .prose h2');
-  const answers = document.querySelectorAll('[class*="answer"], [class*="response"], .prose > div');
+    // Perplexity query/answer pairs - try multiple selector strategies
+    // Strategy 1: class-based selectors
+    const queries = document.querySelectorAll('[class*="query"], [class*="question"], .prose h2');
+    const answers = document.querySelectorAll('[class*="answer"], [class*="response"], .prose > div');
 
-  queries.forEach((q, i) => {
-    const qText = q.innerText?.trim();
-    if (qText) {
-      messages.push({ role: 'user', content: qText.substring(0, 10000), timestamp: new Date().toISOString() });
+    queries.forEach((q, i) => {
+      try {
+        const qText = q.innerText?.trim();
+        if (qText && qText.length > 2 && !seenContent.has(qText)) {
+          seenContent.add(qText);
+          messages.push({ role: 'user', content: qText.substring(0, 10000), timestamp: new Date().toISOString() });
+        }
+
+        const a = answers[i];
+        if (a) {
+          const aText = a.innerText?.trim();
+          if (aText && aText.length > 10 && !seenContent.has(aText)) {
+            seenContent.add(aText);
+            messages.push({ role: 'assistant', content: aText.substring(0, 10000), timestamp: new Date().toISOString() });
+          }
+        }
+      } catch (e) {}
+    });
+
+    // Strategy 2: fallback - look for message-like containers
+    if (messages.length === 0) {
+      const msgEls = document.querySelectorAll('[class*="message"], [class*="Message"], [class*="chat-turn"], [role="article"]');
+      msgEls.forEach((el, i) => {
+        try {
+          const text = el.innerText?.trim();
+          if (text && text.length > 20 && text.length < 50000 && !seenContent.has(text)) {
+            seenContent.add(text);
+            const isUser = (el.className || '').includes('user') || (el.className || '').includes('query');
+            messages.push({
+              role: isUser ? 'user' : 'assistant',
+              content: text.substring(0, 10000),
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (e) {}
+      });
     }
 
-    const a = answers[i];
-    if (a) {
-      const aText = a.innerText?.trim();
-      if (aText) {
-        messages.push({ role: 'assistant', content: aText.substring(0, 10000), timestamp: new Date().toISOString() });
-      }
-    }
-  });
-
-  return { platform: 'perplexity', messages, url: window.location.href };
+    return { platform: 'perplexity', messages, url, debug: { messageCount: messages.length } };
+  } catch (e) {
+    return { platform: 'perplexity', messages: [], url: window.location.href, error: e.message };
+  }
 })();
 `;
 
 // Grok extractor
 const grokExtractor = `
 (function() {
-  const messages = [];
+  try {
+    const messages = [];
 
-  const messageEls = document.querySelectorAll('[class*="message"], [class*="chat-turn"], [role="article"]');
+    const messageEls = document.querySelectorAll('[class*="message"], [class*="chat-turn"], [role="article"]');
 
-  messageEls.forEach((el, i) => {
-    const text = el.innerText?.trim();
-    if (text && text.length > 10) {
-      const isUser = el.className?.includes('user') ||
-                     el.querySelector('[class*="user"]') ||
-                     el.getAttribute('data-role') === 'user';
-      messages.push({
-        role: isUser ? 'user' : 'assistant',
-        content: text.substring(0, 10000),
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
+    messageEls.forEach((el, i) => {
+      try {
+        const text = el.innerText?.trim();
+        if (text && text.length > 10) {
+          const isUser = el.className?.includes('user') ||
+                         el.querySelector('[class*="user"]') ||
+                         el.getAttribute('data-role') === 'user';
+          messages.push({
+            role: isUser ? 'user' : 'assistant',
+            content: text.substring(0, 10000),
+            timestamp: new Date().toISOString()
+          });
+        }
+      } catch (e) {}
+    });
 
-  return { platform: 'grok', messages, url: window.location.href };
+    return { platform: 'grok', messages, url: window.location.href, debug: { messageCount: messages.length } };
+  } catch (e) {
+    return { platform: 'grok', messages: [], url: window.location.href, error: e.message };
+  }
 })();
 `;
 
 // DeepSeek extractor
 const deepseekExtractor = `
 (function() {
-  const messages = [];
+  try {
+    const messages = [];
 
-  const messageEls = document.querySelectorAll('[class*="message"], [class*="chat-message"]');
+    const messageEls = document.querySelectorAll('[class*="message"], [class*="chat-message"]');
 
-  messageEls.forEach((el, i) => {
-    const text = el.innerText?.trim();
-    if (text && text.length > 10) {
-      const isUser = el.className?.includes('user') || i % 2 === 0;
-      messages.push({
-        role: isUser ? 'user' : 'assistant',
-        content: text.substring(0, 10000),
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
+    messageEls.forEach((el, i) => {
+      try {
+        const text = el.innerText?.trim();
+        if (text && text.length > 10) {
+          const isUser = el.className?.includes('user') || i % 2 === 0;
+          messages.push({
+            role: isUser ? 'user' : 'assistant',
+            content: text.substring(0, 10000),
+            timestamp: new Date().toISOString()
+          });
+        }
+      } catch (e) {}
+    });
 
-  return { platform: 'deepseek', messages, url: window.location.href };
+    return { platform: 'deepseek', messages, url: window.location.href, debug: { messageCount: messages.length } };
+  } catch (e) {
+    return { platform: 'deepseek', messages: [], url: window.location.href, error: e.message };
+  }
 })();
 `;
 

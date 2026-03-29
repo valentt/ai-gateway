@@ -59,5 +59,48 @@ contextBridge.exposeInMainWorld('aiGateway', {
   // Listen for image generation requests
   onGenerateImage: (callback) => {
     ipcRenderer.on('generate-image', (event, data) => callback(data));
-  }
+  },
+
+  // Chat API - Send message to AI platform
+  onSendChat: (callback) => {
+    ipcRenderer.on('send-chat', (event, data) => callback(data));
+  },
+
+  // Send chat result back to main process
+  sendChatResult: (result) => ipcRenderer.send('chat-completed', result),
+
+  // Token extraction for direct API
+  onGetToken: (callback) => {
+    ipcRenderer.on('get-token', (event, data) => callback(data));
+  },
+
+  // Send token back to main process
+  sendToken: (platform, token) => ipcRenderer.send('token-result', { platform, token }),
+
+  // ── Unified Send (v2) ──
+  // Listen for unified inject command (send prompt to multiple webviews)
+  onUnifiedInject: (callback) => {
+    ipcRenderer.on('unified-inject', (event, data) => callback(data));
+  },
+
+  // Report injection result per platform
+  sendInjectResult: (platform, success, error) => {
+    ipcRenderer.send('inject-result', { platform, success, error });
+  },
+
+  // Report scraped response per platform
+  sendResponseScraped: (data) => {
+    ipcRenderer.send('response-scraped', data);
+  },
+
+  // Listen for unified response updates (for panel display)
+  onUnifiedResponse: (callback) => {
+    ipcRenderer.on('unified-response', (event, data) => callback(data));
+  },
+
+  // Get injector availability for a platform
+  getInjector: (platformId) => ipcRenderer.invoke('get-injector', platformId),
+
+  // Trigger unified send
+  unifiedSend: (message, platforms) => ipcRenderer.invoke('unified-send', { message, platforms })
 });

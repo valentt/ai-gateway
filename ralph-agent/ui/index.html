@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Gateway v2</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Topbar */
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      background: #16213e;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 16px;
+      z-index: 1000;
+    }
+
+    .topbar h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    /* Mode Toggle */
+    .mode-toggle {
+      display: flex;
+      gap: 8px;
+      background: #0f3460;
+      border-radius: 20px;
+      padding: 4px;
+    }
+
+    .mode-btn {
+      padding: 6px 16px;
+      border: none;
+      border-radius: 16px;
+      background: transparent;
+      color: #aaa;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+
+    .mode-btn.active {
+      background: #e94560;
+      color: #fff;
+    }
+
+    .mode-btn:hover:not(.active) {
+      color: #fff;
+    }
+
+    /* Webviews container */
+    .webviews-container {
+      position: fixed;
+      top: 48px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    .webview-tab {
+      position: relative;
+      width: 300px;
+      height: calc(100% - 24px);
+      background: #16213e;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .webview-tab.webview {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .webview-header {
+      height: 36px;
+      background: #0f3460;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 8px;
+      border-bottom: 1px solid #1a1a2e;
+    }
+
+    .webview-header h3 {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .platform-icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+    }
+
+    .webview-content {
+      flex: 1;
+      position: relative;
+    }
+
+    /* Response panels grid */
+    .response-panels {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      padding-top: 64px; /* Account for topbar height */
+    }
+
+    .response-panel {
+      background: #16213e;
+      border-radius: 8px;
+      overflow: hidden;
+      min-height: calc(100% - 24px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .response-panel-header {
+      height: 36px;
+      background: #0f3460;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 8px;
+      border-bottom: 1px solid #1a1a2e;
+    }
+
+    .response-panel-header h3 {
+      font-size: 13px;
+      font-weight: 500;
+      margin: 0;
+    }
+
+    .response-panel-content {
+      flex: 1;
+      overflow-y: auto;
+      background: #1a1a2e;
+      padding: 12px;
+    }
+
+    /* Message styles in panels */
+    .message-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .panel-message-user {
+      background: #0f3460;
+      color: white;
+      padding: 10px 14px;
+      border-radius: 16px;
+      margin-left: 8px;
+      max-width: 85%;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .panel-message-assistant {
+      background: #2a2a4e;
+      color: #eee;
+      padding: 10px 14px;
+      border-radius: 16px;
+      margin-right: 8px;
+      max-width: 85%;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .panel-message-system {
+      text-align: center;
+      color: #888;
+      font-size: 12px;
+      padding: 6px 0;
+    }
+
+    /* Panels mode styles */
+    body.panels-mode .webviews-container {
+      display: none;
+    }
+
+    body.panels-mode .response-panels {
+      display: grid;
+    }
+
+    /* Offscreen webviews in panels mode */
+    body.panels-mode .webview-tab {
+      position: absolute;
+      left: -9999px;
+      visibility: hidden;
+    }
+
+    /* Platform colors */
+    .platform-chatgpt { background: #5865F2; }
+    .platform-claude { background: #000; border: 1px solid #333; }
+    .platform-gemini { background: #4285F4; }
+    .platform-grok { background: #FF6B00; }
+    .platform-deepseek { background: #667eea; }
+    .platform-kimi { background: #16bf9b; }
+    .platform-qwen { background: #107d54; }
+    .platform-perplexity { background: #111; border: 1px solid #333; }
+    .platform-manus { background: #f24e1e; }
+
+    /* Loading indicator */
+    .loading {
+      width: 20px;
+      height: 20px;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      border-top-color: transparent;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Empty state for panels */
+    .empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #888;
+      font-size: 13px;
+    }
+
+    /* Message timestamp */
+    .message-time {
+      font-size: 11px;
+      opacity: 0.7;
+      margin-bottom: 4px;
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #1a1a2e;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #333;
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #444;
+    }
+  </style>
+</head>
+<body>
+  <!-- Topbar -->
+  <div class="topbar">
+    <h1>AI Gateway v2</h1>
+    
+    <!-- Mode Toggle -->
+    <div class="mode-toggle" id="modeToggle">
+      <button class="mode-btn active" data-mode="tabs">Tabs</button>
+      <button class="mode-btn" data-mode="panels">Panels</button>
+    </div>
+  </div>
+
+  <!-- Webviews container (shown in tabs mode) -->
+  <div class="webviews-container" id="webviewsContainer">
+    <!-- ChatGPT webview -->
+    <div class="webview-tab platform-chatgpt" data-platform="chatgpt">
+      <div class="webview-header">
+        <div class="platform-icon"></div>
+        <h3>ChatGPT</h3>
+      </div>
+      <div class="webview-content">
+        <!-- Webview element will be injected here -->
+      </div>
+    </div>
+
+    <!-- Claude webview -->
+    <div class="webview-tab platform-claude" data-platform="claude">
+      <div class="webview-header">
+        <div class="platform-icon"></div>
+        <h3>Claude</h3>
+      </div>
+      <div class="webview-content">
+        <!-- Webview element will be injected here -->
+      </div>
+    </div>
+
+    <!-- Gemini webview -->
+    <div class="webview-tab platform-gemini" data-platform="gemini">
+      <div class="webview-header">
+        <div class="platform-icon"></div>
+        <h3>Google Gemini</h3>
+      </div>
+      <div class="webview-content">
+        <!-- Webview element will be injected here -->
+      </div>
+    </div>
+
+    <!-- Grok webview -->
+    <div class="webview-tab platform-grok" data-platform="grok">
+      <div class="webview-header">
+        <div class="platform-icon"></div>
+        <h3>Grok</hh3>
+      </div>
+      <div class="webview-content">
+        <!-- Webview element will be injected here -->
+      </div>
+    </div>
+
+    <!-- DeepSeek webview -->
+    <div class="webview-tab platform-deepseek" data-platform="deepseek">
+      <div class="webview-header">
+        <div class="platform-icon"></div>
+        <h3>DeepSeek</h3>
+      </div>
+      <div class="webview-content">
+        <!-- Webview element will be injected here -->
+      </div>
+    </div>
+
+    <!-- Kimi webview -->
+    <div class="webview-tab platform-kimi" data-platform="kimi">
+      <div class="webview-header">
+        <div class="platform-icon"></div>
+        <h3>Kimi</h3>
+      </div>
+      <div class="webview-content">
+        <!-- Webview element will be injected here -->
+      </div>
+    </div>
+
+    <!-- Qwen webview -->
+    <div class="webview-tab platform-qwen" data-platform="qwen">
+      <div class="webview-header">
+        <div class="platform-icon"></div>
+        <h3>Qwen</h3>
+      </div>
+      <div class="webview-content">
+        <!-- Webview element will be injected here -->
+      </div>
+    </div>
+
+    <!-- Perplexity webview -->
+    <div class="webview-tab platform-perplexity" data-platform="perplexity">
+      <div class="webview-header">
+        <div class="platform-icon"></div>
+        <h3>Perplexity</h3>
+      </div>
+      <div class="webview-content">
+        <!-- Webview element will be injected here -->
+      </div>
+    </div>
+
+    <!-- Manus webview -->
+    <div class="webview-tab platform-manus" data-platform="manus">
+      <div class="webview-header">
+        <div class="platform-icon"></div>
+        <h3>Manus</h3>
+      </div>
+      <div class="webview-content">
+        <!-- Webview element will be injected here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Response panels grid (shown in panels mode) -->
+  <div class="response-panels" id="responsePanels" style="display:none;">
+    <!-- Panels will be dynamically created -->
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

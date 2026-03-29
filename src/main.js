@@ -13,10 +13,15 @@
 
 const { app, BrowserWindow, session, ipcMain, Menu, clipboard } = require('electron');
 const path = require('path');
+const https = require('https');
 const Store = require('electron-store');
 const { initDatabase, saveConversation, saveMessage } = require('./db/database');
 const { startApiServer, stopApiServer } = require('./api/server');
 const { extractors } = require('./extractors');
+const { injectors } = require('./injectors');
+
+// Token cache for direct API calls
+const tokenCache = {};
 
 
 // Enable media/WebRTC features for voice input (Linux only - crashes on Windows)
@@ -107,13 +112,13 @@ const AI_PLATFORMS = {
   },
   kimi: {
     name: 'Kimi',
-    url: 'https://kimi.moonshot.cn',
+    url: 'https://kimi.moonshot.cn/chat',
     icon: 'kimi.png',
     tier: 2
   },
   qwen: {
     name: 'Qwen',
-    url: 'https://tongyi.aliyun.com',
+    url: 'https://chat.qwen.ai',
     icon: 'qwen.png',
     tier: 2
   },
@@ -170,10 +175,19 @@ async function initApp() {
   console.log('[DB] Initializing SQLite database...');
   initDatabase();
 
-  // Start API server
-  console.log(`[API] Starting server on port ${API_PORT}...`);
-  apiServer = await startApiServer(API_PORT);
-  console.log(`[API] Server running at http://localhost:${API_PORT}`);
+  // Start API server (non-fatal if it fails - app still works)
+  try {
+    console.log(`[API] Starting server on port ${API_PORT}...`);
+    apiServer = await startApiServer(API_PORT);
+    if (apiServer) {
+      console.log(`[API] Server running at http://localhost:${API_PORT}`);
+    } else {
+      console.warn('[API] Server could not start, but app will continue without API');
+    }
+  } catch (err) {
+    console.error('[API] Server startup failed:', err.message);
+    console.warn('[API] App will continue without API server');
+  }
 
   // Create main window
   createWindow();
@@ -475,8 +489,185 @@ async function generateImage(prompt, saveTo) {
   });
 }
 
+// Chat API via webview
+let chatResolver = null;
+
+ipcMain.on('chat-completed', (event, result) => {
+  console.log('[ChatAPI] Received result from renderer:', result.success, result.error || result.response?.substring(0, 50) || '', result.debug ? JSON.stringify(result.debug) : '');
+  if (chatResolver) {
+    chatResolver(result);
+    chatResolver = null;
+  }
+});
+
+// Store token from renderer
+ipcMain.on('store-token', (event, { platform, token }) => {
+  if (token) {
+    tokenCache[platform] = token;
+    console.log('[ChatAPI] Token stored for:', platform);
+  }
+});
+
+// Direct API call to DeepSeek (OpenAI-compatible)
+function callDeepSeekAPI(token, message) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: message }],
+      stream: false
+    });
+
+    const options = {
+      hostname: 'api.deepseek.com',
+      port: 443,
+      path: '/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'Content-Length': Buffer.byteLength(data)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const result = JSON.parse(body);
+            const content = result.choices?.[0]?.message?.content || 'No response';
+            resolve({ success: true, response: content, method: 'direct-api' });
+          } else {
+            console.log('[ChatAPI] DeepSeek API error:', res.statusCode, body);
+            resolve({ success: false, error: `API error: ${res.statusCode}` });
+          }
+        } catch (e) {
+          resolve({ success: false, error: `Parse error: ${e.message}` });
+        }
+      });
+    });
+
+    req.on('error', (e) => {
+      resolve({ success: false, error: e.message });
+    });
+
+    req.setTimeout(60000, () => {
+      req.destroy();
+      resolve({ success: false, error: 'Timeout' });
+    });
+
+    req.write(data);
+    req.end();
+  });
+}
+
+// Function for API server to call - send chat message to AI platform
+async function sendChatMessage(platform, message, profile = 'default') {
+  console.log('[ChatAPI] sendChatMessage called:', platform, message.substring(0, 50));
+
+  // TODO: Direct API disabled for now - token type mismatch
+  // The localStorage token is a session token, not an API key
+  // Need either: proper API key, or different token extraction method
+  /*
+  // First, try to get token from renderer and use direct API
+  if (platform === 'deepseek' && mainWindow) {
+    try {
+      // Request token extraction from renderer
+      const tokenPromise = new Promise((resolve) => {
+        const handler = (event, data) => {
+          ipcMain.removeListener('token-result', handler);
+          resolve(data.token);
+        };
+        ipcMain.once('token-result', handler);
+        setTimeout(() => {
+          ipcMain.removeListener('token-result', handler);
+          resolve(null);
+        }, 5000);
+        mainWindow.webContents.send('get-token', { platform });
+      });
+
+      const token = await tokenPromise;
+      console.log('[ChatAPI] Got token from renderer:', token ? 'YES' : 'NO');
+
+      if (token) {
+        tokenCache[platform] = token;
+        console.log('[ChatAPI] Trying direct DeepSeek API...');
+        const directResult = await callDeepSeekAPI(token, message);
+        console.log('[ChatAPI] Direct API result:', directResult.success);
+        if (directResult.success) {
+          return directResult;
+        }
+        console.log('[ChatAPI] Direct API failed, falling back to webview');
+      }
+    } catch (e) {
+      console.log('[ChatAPI] Token extraction error:', e.message);
+    }
+  }
+  */
+
+  // Webview automation
+  return new Promise((resolve, reject) => {
+    if (!mainWindow) {
+      resolve({ success: false, error: 'No main window' });
+      return;
+    }
+
+    // Set timeout (120s - allows 60s for previous generation + response time)
+    const timeout = setTimeout(() => {
+      chatResolver = null;
+      resolve({ success: false, error: 'Timeout (120s) - AI may still be processing' });
+    }, 120000);
+
+    // Store resolver
+    chatResolver = (result) => {
+      clearTimeout(timeout);
+      resolve(result);
+    };
+
+    // Send to renderer
+    mainWindow.webContents.send('send-chat', { platform, message, profile });
+    console.log('[ChatAPI] Sent request to renderer:', platform, message.substring(0, 50));
+  });
+}
+
+// ── UNIFIED SEND (v2) ─────────────────────────────────────────────────
+// Send same prompt to multiple providers in parallel, stream results back
+
+ipcMain.handle('get-injector', (event, platformId) => {
+  return injectors[platformId] ? platformId : null;
+});
+
+// Unified send: inject message into multiple webviews, poll for responses
+ipcMain.handle('unified-send', async (event, { message, platforms }) => {
+  console.log(`[Unified] Sending to ${platforms.length} providers: ${message.substring(0, 50)}`);
+
+  // Tell renderer to inject into all selected webviews
+  if (mainWindow) {
+    mainWindow.webContents.send('unified-inject', { message, platforms });
+  }
+  return { success: true, platforms };
+});
+
+// Renderer reports injection result per platform
+ipcMain.on('inject-result', (event, { platform, success, error }) => {
+  console.log(`[Unified] Inject ${platform}: ${success ? 'OK' : error}`);
+});
+
+// Renderer reports scraped response per platform
+ipcMain.on('response-scraped', (event, data) => {
+  const { platform, content, tokens, durationMs, done } = data;
+  if (done) {
+    console.log(`[Unified] ${platform} done: ${content?.substring(0, 50)} (${tokens} tokens, ${durationMs}ms)`);
+  }
+  // Forward to renderer for panel display
+  if (mainWindow) {
+    mainWindow.webContents.send('unified-response', data);
+  }
+});
+
 // Export for API server access
-module.exports = { AI_PLATFORMS, mainWindow, generateImage };
+module.exports = { AI_PLATFORMS, mainWindow, generateImage, sendChatMessage };
 
 // Context menu handler for webviews - Copy URL functionality
 ipcMain.on('show-context-menu', (event, params) => {

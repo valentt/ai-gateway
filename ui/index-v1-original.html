@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://localhost:*;">
+  <title>AI Gateway</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header with tabs */
+    .header {
+      background: #161b22;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #30363d;
+      -webkit-app-region: drag;
+    }
+
+    .logo {
+      font-weight: bold;
+      font-size: 14px;
+      color: #58a6ff;
+      margin-right: 16px;
+      -webkit-app-region: no-drag;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      -webkit-app-region: no-drag;
+    }
+
+    .tab {
+      padding: 8px 12px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px 6px 0 0;
+      color: #8b949e;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+    }
+
+    .tab:hover {
+      background: #30363d;
+      color: #e6edf3;
+    }
+
+    .tab.active {
+      background: #0d1117;
+      color: #58a6ff;
+      border-bottom-color: #0d1117;
+    }
+
+    .tab.search-tab {
+      background: #238636;
+      border-color: #238636;
+      color: #fff;
+    }
+
+    .tab.search-tab:hover {
+      background: #2ea043;
+    }
+
+    .tab.search-tab.active {
+      background: #238636;
+      color: #fff;
+    }
+
+    .tab .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #3fb950;
+    }
+
+    .tab .dot.loading {
+      background: #d29922;
+      animation: pulse 1s infinite;
+    }
+
+    .tab .profile-badge {
+      font-size: 10px;
+      background: #30363d;
+      padding: 2px 6px;
+      border-radius: 10px;
+      color: #8b949e;
+      max-width: 80px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab.active .profile-badge {
+      background: #21262d;
+      color: #58a6ff;
+    }
+
+    .tab .profile-arrow {
+      font-size: 10px;
+      margin-left: 2px;
+      opacity: 0.6;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Profile dropdown */
+    .profile-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      min-width: 200px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      z-index: 1000;
+      display: none;
+      padding: 8px 0;
+    }
+
+    .profile-dropdown.visible {
+      display: block;
+    }
+
+    .profile-dropdown-header {
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #8b949e;
+      border-bottom: 1px solid #30363d;
+      margin-bottom: 4px;
+    }
+
+    .profile-item {
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      color: #e6edf3;
+      font-size: 13px;
+    }
+
+    .profile-item:hover {
+      background: #21262d;
+    }
+
+    .profile-item.active {
+      background: #238636;
+      color: #fff;
+    }
+
+    .profile-item .profile-name {
+      flex: 1;
+    }
+
+    .profile-item .profile-actions {
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+    }
+
+    .profile-item:hover .profile-actions {
+      opacity: 1;
+    }
+
+    .profile-item.active .profile-actions {
+      opacity: 1;
+    }
+
+    .profile-action-btn {
+      padding: 2px 6px;
+      background: none;
+      border: none;
+      color: #8b949e;
+      cursor: pointer;
+      font-size: 11px;
+      border-radius: 4px;
+    }
+
+    .profile-action-btn:hover {
+      background: rgba(255,255,255,0.1);
+      color: #e6edf3;
+    }
+
+    .profile-divider {
+      height: 1px;
+      background: #30363d;
+      margin: 4px 0;
+    }
+
+    .profile-add-btn {
+      padding: 8px 12px;
+      color: #58a6ff;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .profile-add-btn:hover {
+      background: #21262d;
+    }
+
+    /* API status indicator */
+    .api-status {
+      margin-left: auto;
+      font-size: 12px;
+      color: #3fb950;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      -webkit-app-region: no-drag;
+    }
+
+    .api-status .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #3fb950;
+    }
+
+    /* WebView container */
+    .webview-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    webview {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    webview.active {
+      visibility: visible;
+      pointer-events: auto;
+    }
+
+    /* Search Panel */
+    .search-panel {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #0d1117;
+      display: none;
+      flex-direction: column;
+      padding: 24px;
+    }
+
+    .search-panel.active {
+      display: flex;
+    }
+
+    .search-header {
+      margin-bottom: 24px;
+    }
+
+    .search-header h2 {
+      font-size: 24px;
+      color: #e6edf3;
+      margin-bottom: 16px;
+    }
+
+    .search-input-wrapper {
+      display: flex;
+      gap: 12px;
+    }
+
+    .search-input {
+      flex: 1;
+      padding: 12px 16px;
+      font-size: 16px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      outline: none;
+    }
+
+    .search-input:focus {
+      border-color: #58a6ff;
+      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
+    }
+
+    .search-input::placeholder {
+      color: #8b949e;
+    }
+
+    .search-btn {
+      padding: 12px 24px;
+      background: #238636;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .search-btn:hover {
+      background: #2ea043;
+    }
+
+    .search-filters {
+      display: flex;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .filter-select {
+      padding: 8px 12px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-size: 14px;
+    }
+
+    .search-results {
+      flex: 1;
+      overflow-y: auto;
+      margin-top: 24px;
+    }
+
+    .result-item {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .result-item:hover {
+      border-color: #58a6ff;
+    }
+
+    .result-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .result-platform {
+      background: #21262d;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #58a6ff;
+    }
+
+    .result-time {
+      color: #8b949e;
+      font-size: 12px;
+    }
+
+    .result-role {
+      background: #30363d;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #8b949e;
+    }
+
+    .result-content {
+      color: #e6edf3;
+      line-height: 1.5;
+    }
+
+    .result-content mark {
+      background: rgba(210, 153, 34, 0.4);
+      color: #e6edf3;
+      padding: 0 2px;
+      border-radius: 2px;
+    }
+
+    .no-results {
+      text-align: center;
+      color: #8b949e;
+      padding: 48px;
+    }
+
+    .stats-bar {
+      display: flex;
+      gap: 24px;
+      margin-top: 12px;
+      color: #8b949e;
+      font-size: 14px;
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stat-value {
+      color: #e6edf3;
+      font-weight: 600;
+    }
+
+    .sync-btn {
+      padding: 6px 12px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #58a6ff;
+      font-size: 12px;
+      cursor: pointer;
+      margin-left: auto;
+      transition: all 0.2s;
+    }
+
+    .sync-btn:hover {
+      background: #30363d;
+      border-color: #58a6ff;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+
+    .modal-overlay.visible {
+      display: flex;
+    }
+
+    .modal {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 24px;
+      min-width: 400px;
+      max-width: 500px;
+    }
+
+    .modal-header {
+      font-size: 18px;
+      color: #e6edf3;
+      margin-bottom: 16px;
+    }
+
+    .modal-input {
+      width: 100%;
+      padding: 12px 16px;
+      font-size: 14px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      outline: none;
+      margin-bottom: 16px;
+    }
+
+    .modal-input:focus {
+      border-color: #58a6ff;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+
+    .modal-btn {
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+    }
+
+    .modal-btn-primary {
+      background: #238636;
+      color: #fff;
+    }
+
+    .modal-btn-primary:hover {
+      background: #2ea043;
+    }
+
+    .modal-btn-secondary {
+      background: #21262d;
+      color: #e6edf3;
+      border: 1px solid #30363d;
+    }
+
+    .modal-btn-secondary:hover {
+      background: #30363d;
+    }
+
+    .modal-btn-danger {
+      background: #da3633;
+      color: #fff;
+    }
+
+    .modal-btn-danger:hover {
+      background: #f85149;
+    }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(13, 17, 23, 0.9);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .loading-overlay.visible {
+      display: flex;
+    }
+
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid #30363d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #161b22;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #30363d;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #484f58;
+    }
+
+    /* Welcome message in search */
+    .welcome-hint {
+      text-align: center;
+      padding: 48px;
+      color: #8b949e;
+    }
+
+    .welcome-hint h3 {
+      color: #58a6ff;
+      margin-bottom: 12px;
+      font-size: 18px;
+    }
+
+    .welcome-hint p {
+      margin-bottom: 8px;
+    }
+
+    .keyboard-hint {
+      display: inline-block;
+      background: #21262d;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      margin: 0 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">AI Gateway</div>
+    <div class="tabs" id="tabs">
+      <!-- Search tab (first) -->
+      <button class="tab search-tab active" data-platform="search" onclick="switchTab('search')">
+        <span>🔍</span> Search
+      </button>
+      <!-- Platform tabs will be generated by JavaScript -->
+    </div>
+    <div class="api-status" id="api-status">
+      <span class="dot"></span>
+      <span>API: localhost:<span id="api-port">8088</span></span>
+    </div>
+  </div>
+
+  <div class="webview-container" id="webview-container">
+    <!-- Search Panel (first/default) -->
+    <div class="search-panel active" id="search-panel">
+      <div class="search-header">
+        <h2>Unified Search</h2>
+        <div class="search-input-wrapper">
+          <input type="text" class="search-input" id="search-input" placeholder="Search across all AI conversations..." autofocus>
+          <button class="search-btn" onclick="performSearch()">Search</button>
+        </div>
+        <div class="search-filters">
+          <select class="filter-select" id="filter-platform">
+            <option value="">All Platforms</option>
+            <!-- Options will be populated by JavaScript -->
+          </select>
+          <select class="filter-select" id="filter-limit">
+            <option value="25">25 results</option>
+            <option value="50" selected>50 results</option>
+            <option value="100">100 results</option>
+          </select>
+        </div>
+        <div class="stats-bar" id="stats-bar">
+          <div class="stat">Conversations: <span class="stat-value" id="stat-conversations">0</span></div>
+          <div class="stat">Messages: <span class="stat-value" id="stat-messages">0</span></div>
+          <button class="sync-btn" onclick="syncAllContent()" title="Extract conversations from all open tabs">🔄 Sync All</button>
+          <span id="sync-status" style="color: #3fb950; margin-left: 12px;"></span>
+        </div>
+      </div>
+      <div class="search-results" id="search-results">
+        <div class="welcome-hint">
+          <h3>Welcome to AI Gateway</h3>
+          <p>Search across all your AI conversations, or click a platform tab above.</p>
+          <p>
+            <span class="keyboard-hint">Ctrl+1-9</span> Switch tabs
+            <span class="keyboard-hint">Ctrl+F</span> Search
+            <span class="keyboard-hint">Ctrl+R</span> Reload
+          </p>
+          <p style="margin-top: 16px;">
+            <strong>Tip:</strong> Right-click platform tabs to manage profiles
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="loading-overlay" id="loading">
+      <div class="spinner"></div>
+      <span>Loading...</span>
+    </div>
+    <!-- WebViews will be generated by JavaScript -->
+  </div>
+
+  <!-- Profile Modal -->
+  <div class="modal-overlay" id="profile-modal">
+    <div class="modal">
+      <div class="modal-header" id="modal-header">Add Profile</div>
+      <input type="text" class="modal-input" id="modal-input" placeholder="Profile name">
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="modal-btn modal-btn-danger" id="modal-delete-btn" onclick="deleteProfile()" style="display:none">Delete</button>
+        <button class="modal-btn modal-btn-primary" id="modal-confirm-btn" onclick="confirmModal()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Platform configurations (will be loaded from main process)
+    let platforms = {};
+    let profiles = {};
+    let activeProfiles = {};
+    let activeTab = 'search';
+    let webviews = {}; // { platformId-profileId: webview }
+    let apiPort = 8088;
+    let currentDropdown = null;
+    let modalMode = 'create'; // 'create', 'rename', 'delete'
+    let modalPlatformId = null;
+    let modalProfileId = null;
+
+    // Initialize app
+    async function init() {
+      // Get platforms from main process
+      platforms = await window.aiGateway.getPlatforms();
+      apiPort = await window.aiGateway.getApiPort();
+
+      // Get profiles
+      const profileData = await window.aiGateway.getProfiles();
+      profiles = profileData.profiles;
+      activeProfiles = profileData.activeProfiles;
+
+      document.getElementById('api-port').textContent = apiPort;
+
+      // Populate platform filter
+      const filterSelect = document.getElementById('filter-platform');
+      Object.entries(platforms).forEach(([id, platform]) => {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = platform.name;
+        filterSelect.appendChild(option);
+      });
+
+      // Create tabs
+      const tabsContainer = document.getElementById('tabs');
+
+      Object.entries(platforms).forEach(([id, platform], index) => {
+        // Create tab
+        const tab = document.createElement('button');
+        tab.className = 'tab';
+        tab.dataset.platform = id;
+
+        const activeProfileId = activeProfiles[id] || 'default';
+        const activeProfileName = profiles[id]?.[activeProfileId]?.name || 'Default';
+        const profileCount = Object.keys(profiles[id] || {}).length;
+
+        tab.innerHTML = `
+          <span class="dot"></span>
+          <span class="platform-name">${platform.name}</span>
+          ${profileCount > 1 ? `<span class="profile-badge" title="${activeProfileName}">${activeProfileName}</span>` : ''}
+          ${profileCount > 1 ? '<span class="profile-arrow">▼</span>' : ''}
+        `;
+
+        tab.addEventListener('click', (e) => {
+          e.stopPropagation();
+          switchTab(id);
+        });
+
+        tab.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          showProfileDropdown(id, tab);
+        });
+
+        // Create profile dropdown
+        const dropdown = createProfileDropdown(id);
+        tab.appendChild(dropdown);
+
+        tabsContainer.appendChild(tab);
+
+        // Create webview for active profile
+        createWebview(id, activeProfileId);
+      });
+
+      // Close dropdowns when clicking elsewhere
+      document.addEventListener('click', () => {
+        closeAllDropdowns();
+      });
+
+      // Keyboard shortcuts
+      document.addEventListener('keydown', handleKeyboard);
+
+      // Search input enter key
+      document.getElementById('search-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          performSearch();
+        }
+      });
+
+      // Modal enter key
+      document.getElementById('modal-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          confirmModal();
+        }
+        if (e.key === 'Escape') {
+          closeModal();
+        }
+      });
+
+      // Load stats
+      loadStats();
+
+      // Session restore: Restore last active platform
+      const lastPlatform = await window.aiGateway.getLastActivePlatform();
+      if (lastPlatform && platforms[lastPlatform]) {
+        console.log('[Session] Restoring last active platform:', lastPlatform);
+        // Create the webview first
+        const lastProfileId = activeProfiles[lastPlatform] || 'default';
+        await createWebview(lastPlatform, lastProfileId);
+        // Then switch to that tab
+        switchTab(lastPlatform);
+      } else {
+        console.log('[Session] No last platform to restore, staying on search');
+      }
+    }
+
+    // Create profile dropdown for a platform
+    function createProfileDropdown(platformId) {
+      const dropdown = document.createElement('div');
+      dropdown.className = 'profile-dropdown';
+      dropdown.id = `dropdown-${platformId}`;
+      dropdown.addEventListener('click', (e) => e.stopPropagation());
+      updateProfileDropdown(platformId, dropdown);
+      return dropdown;
+    }
+
+    // Update profile dropdown content
+    function updateProfileDropdown(platformId, dropdown = null) {
+      if (!dropdown) {
+        dropdown = document.getElementById(`dropdown-${platformId}`);
+      }
+      if (!dropdown) return;
+
+      const platformProfiles = profiles[platformId] || {};
+      const activeProfileId = activeProfiles[platformId] || 'default';
+
+      dropdown.innerHTML = `
+        <div class="profile-dropdown-header">Profiles</div>
+        ${Object.entries(platformProfiles).map(([profileId, profile]) => `
+          <div class="profile-item ${profileId === activeProfileId ? 'active' : ''}"
+               onclick="selectProfile('${platformId}', '${profileId}')"
+               data-profile-id="${profileId}">
+            <span class="profile-name">${profile.name}</span>
+            <div class="profile-actions">
+              <button class="profile-action-btn" onclick="event.stopPropagation(); renameProfileModal('${platformId}', '${profileId}', '${profile.name}')" title="Rename">✏️</button>
+              ${profileId !== 'default' ? `<button class="profile-action-btn" onclick="event.stopPropagation(); deleteProfileModal('${platformId}', '${profileId}')" title="Delete">🗑️</button>` : ''}
+            </div>
+          </div>
+        `).join('')}
+        <div class="profile-divider"></div>
+        <div class="profile-add-btn" onclick="addProfileModal('${platformId}')">
+          <span>➕</span> Add Profile
+        </div>
+      `;
+    }
+
+    // Show profile dropdown
+    function showProfileDropdown(platformId, tab) {
+      closeAllDropdowns();
+      const dropdown = document.getElementById(`dropdown-${platformId}`);
+      if (dropdown) {
+        dropdown.classList.add('visible');
+        currentDropdown = dropdown;
+      }
+    }
+
+    // Close all dropdowns
+    function closeAllDropdowns() {
+      document.querySelectorAll('.profile-dropdown').forEach(d => {
+        d.classList.remove('visible');
+      });
+      currentDropdown = null;
+    }
+
+    // Select a profile
+    async function selectProfile(platformId, profileId) {
+      closeAllDropdowns();
+
+      if (activeProfiles[platformId] === profileId) {
+        // Already active, just switch to tab
+        switchTab(platformId);
+        return;
+      }
+
+      // Update active profile
+      await window.aiGateway.setActiveProfile(platformId, profileId);
+      activeProfiles[platformId] = profileId;
+
+      // Remove old webview for this platform
+      const webviewContainer = document.getElementById('webview-container');
+      Object.keys(webviews).forEach(key => {
+        if (key.startsWith(`${platformId}-`)) {
+          webviews[key].remove();
+          delete webviews[key];
+        }
+      });
+
+      // Create new webview with new partition
+      createWebview(platformId, profileId);
+
+      // Update tab UI
+      updateTabUI(platformId);
+
+      // Switch to this tab
+      switchTab(platformId);
+    }
+
+    // Create a webview for platform+profile
+    async function createWebview(platformId, profileId) {
+      const key = `${platformId}-${profileId}`;
+      if (webviews[key]) return webviews[key];
+
+      const platform = platforms[platformId];
+      const partition = await window.aiGateway.getPartition(platformId, profileId);
+
+      const webview = document.createElement('webview');
+      webview.id = `webview-${key}`;
+      
+      // Session restore: Try to use last saved URL, otherwise use default
+      const savedUrl = await window.aiGateway.getLastUrl(platformId, profileId);
+      webview.src = savedUrl || platform.url;
+      console.log(`[Session] Restoring ${platformId}: ${savedUrl ? 'saved URL' : 'default URL'}`);
+      webview.partition = partition;
+      webview.setAttribute('allowpopups', '');
+      webview.setAttribute('webpreferences', 'contextIsolation=yes, enableRemoteModule=false');
+      
+      // Enable crash handler
+      webview.addEventListener('crashed', (e) => {
+        console.error('[Crash]', platformId, 'webview crashed!');
+        alert('Webview crashed! Reloading...');
+        webview.reload();
+      });
+      
+      webview.addEventListener('render-process-gone', (e) => {
+        console.error('[RenderGone]', platformId, 'render process gone:', e.details);
+      });
+
+      // Get tab for loading indicator
+      const tab = document.querySelector(`.tab[data-platform="${platformId}"]`);
+
+      // Loading state
+      webview.addEventListener('did-start-loading', () => {
+        const dot = tab?.querySelector('.dot');
+        if (dot) dot.classList.add('loading');
+      });
+
+      webview.addEventListener('did-stop-loading', () => {
+        const dot = tab?.querySelector('.dot');
+        if (dot) dot.classList.remove('loading');
+
+        console.log(`[UI] Webview loaded for ${platformId}, will extract in 2s`);
+        // Extract content after page loads (with delay for dynamic content)
+        setTimeout(() => {
+          console.log(`[UI] Starting extraction for ${platformId}`);
+          extractContent(platformId, webview);
+        }, 2000);
+      });
+
+      // Also extract on SPA navigation (user navigates within the app)
+      webview.addEventListener('did-navigate-in-page', (e) => {
+        if (e.isMainFrame) {
+          console.log(`[UI] SPA navigation in ${platformId} to ${e.url}`);
+          setTimeout(() => extractContent(platformId, webview), 2000);
+          
+          // Session restore: Save current URL
+          window.aiGateway.saveLastUrl(platformId, profileId, e.url);
+          console.log(`[Session] Saved URL for ${platformId}: ${e.url.substring(0, 60)}...`);
+        }
+      });
+      
+      // Also save on main frame navigation
+      webview.addEventListener('did-navigate', (e) => {
+        window.aiGateway.saveLastUrl(platformId, profileId, e.url);
+        console.log(`[Session] Saved URL for ${platformId}: ${e.url.substring(0, 60)}...`);
+      });
+
+      // Context menu with Copy URL
+      console.log('[DEBUG] Setting up context-menu for', platformId);
+      webview.addEventListener('context-menu', (e) => {
+        e.preventDefault();
+        console.log('[DEBUG] Context menu triggered!', e.params);
+        window.aiGateway.showContextMenu({
+          linkURL: e.params.linkURL,
+          pageURL: webview.getURL()
+        });
+      });
+
+      // Error handling
+      webview.addEventListener('did-fail-load', (e) => {
+        console.error(`[${platformId}] Failed to load:`, e.errorDescription);
+      });
+
+      document.getElementById('webview-container').appendChild(webview);
+      webviews[key] = webview;
+
+      return webview;
+    }
+
+    // Update tab UI (badge, arrow)
+    function updateTabUI(platformId) {
+      const tab = document.querySelector(`.tab[data-platform="${platformId}"]`);
+      if (!tab) return;
+
+      const activeProfileId = activeProfiles[platformId] || 'default';
+      const activeProfileName = profiles[platformId]?.[activeProfileId]?.name || 'Default';
+      const profileCount = Object.keys(profiles[platformId] || {}).length;
+
+      // Update badge
+      let badge = tab.querySelector('.profile-badge');
+      let arrow = tab.querySelector('.profile-arrow');
+
+      if (profileCount > 1) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'profile-badge';
+          const platformName = tab.querySelector('.platform-name');
+          platformName.after(badge);
+        }
+        badge.textContent = activeProfileName;
+        badge.title = activeProfileName;
+
+        if (!arrow) {
+          arrow = document.createElement('span');
+          arrow.className = 'profile-arrow';
+          arrow.textContent = '▼';
+          badge.after(arrow);
+        }
+      } else {
+        if (badge) badge.remove();
+        if (arrow) arrow.remove();
+      }
+
+      // Update dropdown
+      updateProfileDropdown(platformId);
+    }
+
+    // Modal functions
+    function addProfileModal(platformId) {
+      closeAllDropdowns();
+      modalMode = 'create';
+      modalPlatformId = platformId;
+      modalProfileId = null;
+
+      document.getElementById('modal-header').textContent = `Add Profile for ${platforms[platformId].name}`;
+      document.getElementById('modal-input').value = '';
+      document.getElementById('modal-input').placeholder = 'Profile name (e.g., Work, Personal)';
+      document.getElementById('modal-confirm-btn').textContent = 'Create';
+      document.getElementById('modal-delete-btn').style.display = 'none';
+      document.getElementById('profile-modal').classList.add('visible');
+      document.getElementById('modal-input').focus();
+    }
+
+    function renameProfileModal(platformId, profileId, currentName) {
+      closeAllDropdowns();
+      modalMode = 'rename';
+      modalPlatformId = platformId;
+      modalProfileId = profileId;
+
+      document.getElementById('modal-header').textContent = 'Rename Profile';
+      document.getElementById('modal-input').value = currentName;
+      document.getElementById('modal-input').placeholder = 'New name';
+      document.getElementById('modal-confirm-btn').textContent = 'Rename';
+      document.getElementById('modal-delete-btn').style.display = 'none';
+      document.getElementById('profile-modal').classList.add('visible');
+      document.getElementById('modal-input').focus();
+      document.getElementById('modal-input').select();
+    }
+
+    function deleteProfileModal(platformId, profileId) {
+      closeAllDropdowns();
+      modalMode = 'delete';
+      modalPlatformId = platformId;
+      modalProfileId = profileId;
+
+      const profileName = profiles[platformId]?.[profileId]?.name || profileId;
+
+      document.getElementById('modal-header').textContent = 'Delete Profile';
+      document.getElementById('modal-input').value = profileName;
+      document.getElementById('modal-input').disabled = true;
+      document.getElementById('modal-input').placeholder = '';
+      document.getElementById('modal-confirm-btn').style.display = 'none';
+      document.getElementById('modal-delete-btn').style.display = 'inline-block';
+      document.getElementById('profile-modal').classList.add('visible');
+    }
+
+    function closeModal() {
+      document.getElementById('profile-modal').classList.remove('visible');
+      document.getElementById('modal-input').disabled = false;
+      document.getElementById('modal-confirm-btn').style.display = 'inline-block';
+      modalMode = 'create';
+      modalPlatformId = null;
+      modalProfileId = null;
+    }
+
+    async function confirmModal() {
+      const input = document.getElementById('modal-input');
+      const name = input.value.trim();
+
+      if (modalMode === 'create') {
+        if (!name) return;
+        const result = await window.aiGateway.createProfile(modalPlatformId, name);
+        profiles[modalPlatformId][result.profileId] = result.profile;
+        updateTabUI(modalPlatformId);
+        closeModal();
+        // Optionally switch to new profile
+        selectProfile(modalPlatformId, result.profileId);
+      } else if (modalMode === 'rename') {
+        if (!name) return;
+        await window.aiGateway.renameProfile(modalPlatformId, modalProfileId, name);
+        profiles[modalPlatformId][modalProfileId].name = name;
+        updateTabUI(modalPlatformId);
+        closeModal();
+      }
+    }
+
+    async function deleteProfile() {
+      const result = await window.aiGateway.deleteProfile(modalPlatformId, modalProfileId);
+      if (result.success) {
+        delete profiles[modalPlatformId][modalProfileId];
+        updateTabUI(modalPlatformId);
+        closeModal();
+      } else {
+        alert(result.error);
+      }
+    }
+
+    // Extract content from webview
+    async function extractContent(platformId, webview) {
+      console.log(`[UI] extractContent called for ${platformId}`);
+      try {
+        // Get platform-specific extractor script
+        console.log(`[UI] Getting extractor for ${platformId}`);
+        const extractorScript = await window.aiGateway.getExtractor(platformId);
+        console.log(`[UI] Got extractor, length: ${extractorScript?.length}`);
+
+        // Execute in webview
+        console.log(`[UI] Executing extractor in webview for ${platformId}`);
+        let result;
+        try {
+          result = await webview.executeJavaScript(extractorScript);
+        } catch (execError) {
+          console.error(`[UI] executeJavaScript failed for ${platformId}:`, execError.message);
+          return;
+        }
+        console.log(`[UI] Extractor result for ${platformId}:`, result?.platform, result?.messages?.length || 0, 'messages');
+
+        if (result && result.messages && result.messages.length > 0) {
+          // Save to database
+          console.log(`[UI] Saving ${result.messages.length} messages to database`);
+          const saveResult = await window.aiGateway.saveExtractedContent({
+            platform: platformId,
+            messages: result.messages,
+            url: result.url
+          });
+
+          if (saveResult.success) {
+            console.log(`[UI] Saved ${saveResult.savedCount} messages from ${platformId}`);
+            loadStats(); // Refresh stats
+          } else {
+            console.error(`[UI] Save failed:`, saveResult.error);
+          }
+        } else {
+          console.log(`[UI] No messages found for ${platformId}`);
+        }
+      } catch (error) {
+        console.error(`[UI] Extraction error for ${platformId}:`, error.message, error);
+      }
+    }
+
+    // Sync all webviews (manual trigger)
+    async function syncAllContent() {
+      const statusEl = document.getElementById('sync-status');
+      statusEl.textContent = 'Syncing...';
+
+      let totalSaved = 0;
+      for (const [key, webview] of Object.entries(webviews)) {
+        const platformId = key.split('-')[0];
+        try {
+          const extractorScript = await window.aiGateway.getExtractor(platformId);
+          const result = await webview.executeJavaScript(extractorScript);
+
+          if (result && result.messages && result.messages.length > 0) {
+            const saveResult = await window.aiGateway.saveExtractedContent({
+              platform: platformId,
+              messages: result.messages,
+              url: result.url
+            });
+            if (saveResult.success) {
+              totalSaved += saveResult.savedCount;
+            }
+          }
+        } catch (e) {
+          console.error(`Sync error for ${platformId}:`, e.message);
+        }
+      }
+
+      statusEl.textContent = `Synced ${totalSaved} messages`;
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+      loadStats();
+    }
+
+    // Load statistics
+    async function loadStats() {
+      try {
+        const response = await fetch(`http://localhost:${apiPort}/stats`);
+        const stats = await response.json();
+        document.getElementById('stat-conversations').textContent = stats.totalConversations;
+        document.getElementById('stat-messages').textContent = stats.totalMessages;
+      } catch (error) {
+        console.error('Failed to load stats:', error);
+      }
+    }
+
+    // Perform search
+    async function performSearch() {
+      const query = document.getElementById('search-input').value.trim();
+      if (!query) return;
+
+      const platform = document.getElementById('filter-platform').value;
+      const limit = document.getElementById('filter-limit').value;
+
+      const resultsContainer = document.getElementById('search-results');
+      resultsContainer.innerHTML = '<div class="no-results">Searching...</div>';
+
+      try {
+        let url = `http://localhost:${apiPort}/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+        if (platform) {
+          url += `&platform=${platform}`;
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.results && data.results.length > 0) {
+          resultsContainer.innerHTML = data.results.map(result => `
+            <div class="result-item">
+              <div class="result-header">
+                <span class="result-platform">${result.platform}</span>
+                <span class="result-role">${result.role}</span>
+                <span class="result-time">${result.timestamp}</span>
+              </div>
+              <div class="result-content">${result.highlighted || result.content}</div>
+            </div>
+          `).join('');
+        } else {
+          resultsContainer.innerHTML = '<div class="no-results">No results found</div>';
+        }
+      } catch (error) {
+        resultsContainer.innerHTML = `<div class="no-results">Search error: ${error.message}</div>`;
+      }
+    }
+
+    // Switch to a tab
+    function switchTab(platformId) {
+      closeAllDropdowns();
+
+      // Update tabs
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.platform === platformId);
+      });
+
+      // Hide all content
+      document.getElementById('search-panel').classList.remove('active');
+      Object.values(webviews).forEach(wv => wv.classList.remove('active'));
+
+      // Show appropriate content
+      if (platformId === 'search') {
+        document.getElementById('search-panel').classList.add('active');
+        document.getElementById('search-input').focus();
+        loadStats(); // Refresh stats when going to search
+      } else {
+        const activeProfileId = activeProfiles[platformId] || 'default';
+        const key = `${platformId}-${activeProfileId}`;
+        if (webviews[key]) {
+          webviews[key].classList.add('active');
+          // Auto-extract when switching to a platform tab
+          console.log(`[UI] Tab switch to ${platformId}, triggering extraction`);
+          setTimeout(() => extractContent(platformId, webviews[key]), 500);
+        }
+      }
+
+      activeTab = platformId;
+
+      // Session restore: Save last active platform
+      if (platformId !== 'search') {
+        window.aiGateway.saveLastActivePlatform(platformId);
+      }
+    }
+
+    // Keyboard shortcuts
+    function handleKeyboard(e) {
+      // Escape: Close modal/dropdown
+      if (e.key === 'Escape') {
+        closeAllDropdowns();
+        closeModal();
+        return;
+      }
+
+      // Ctrl+F: Focus search
+      if (e.ctrlKey && e.key === 'f') {
+        switchTab('search');
+        e.preventDefault();
+        return;
+      }
+
+      // Ctrl+1-9: Switch tabs (1 = search, 2+ = platforms)
+      if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
+        const index = parseInt(e.key) - 1;
+        if (index === 0) {
+          switchTab('search');
+        } else {
+          const platformIds = Object.keys(platforms);
+          if (index - 1 < platformIds.length) {
+            switchTab(platformIds[index - 1]);
+          }
+        }
+        e.preventDefault();
+      }
+
+      // Ctrl+Tab: Next tab
+      if (e.ctrlKey && e.key === 'Tab' && !e.shiftKey) {
+        const allIds = ['search', ...Object.keys(platforms)];
+        const currentIndex = allIds.indexOf(activeTab);
+        const nextIndex = (currentIndex + 1) % allIds.length;
+        switchTab(allIds[nextIndex]);
+        e.preventDefault();
+      }
+
+      // Ctrl+Shift+Tab: Previous tab
+      if (e.ctrlKey && e.shiftKey && e.key === 'Tab') {
+        const allIds = ['search', ...Object.keys(platforms)];
+        const currentIndex = allIds.indexOf(activeTab);
+        const prevIndex = (currentIndex - 1 + allIds.length) % allIds.length;
+        switchTab(allIds[prevIndex]);
+        e.preventDefault();
+      }
+
+      // Ctrl+R: Reload current tab
+      if (e.ctrlKey && e.key === 'r' && activeTab && activeTab !== 'search') {
+        const activeProfileId = activeProfiles[activeTab] || 'default';
+        const key = `${activeTab}-${activeProfileId}`;
+        if (webviews[key]) {
+          webviews[key].reload();
+        }
+        e.preventDefault();
+      }
+    }
+
+    // Initialize on load
+    init();
+  </script>
+</body>
+</html>

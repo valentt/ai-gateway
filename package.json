@@ -25,10 +25,13 @@
     "electron-rebuild": "^3.2.9"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
     "better-sqlite3": "^9.2.2",
     "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
     "electron-store": "^8.1.0",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "openai": "^6.33.0"
   },
   "build": {
     "appId": "hr.3dtvornica.ai-gateway",

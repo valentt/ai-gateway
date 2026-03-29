@@ -4,14 +4,18 @@
  * Provides HTTP endpoints for Python/CLI integration.
  * Runs on localhost:8080 by default.
  *
+ * Can run STANDALONE (node src/api/server.js) or inside Electron.
+ *
  * Endpoints:
  * - GET  /health           - Health check
- * - GET  /platforms        - List available platforms
- * - GET  /history          - Get conversation history
- * - GET  /history/:id      - Get specific conversation
- * - GET  /search?q=...     - Full-text search
- * - POST /chat/:platform   - Send message (TODO: implement via webview)
- * - GET  /stats            - Get statistics
+ * - GET  /api/models       - Available LLM models
+ * - POST /api/chat         - Multi-model parallel chat (Faza 1)
+ * - GET  /platforms        - List available platforms (Electron)
+ * - GET  /history          - Get conversation history (Electron)
+ * - GET  /history/:id      - Get specific conversation (Electron)
+ * - GET  /search?q=...     - Full-text search (Electron)
+ * - POST /chat/:platform   - Send message via webview (Electron)
+ * - GET  /stats            - Get statistics (Electron)
  */
 
 const express = require('express');
@@ -20,14 +24,20 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
-const {
-  getHistory,
-  getMessages,
-  searchMessages,
-  getStats,
-  saveConversation,
-  saveMessage
-} = require('../db/database');
+const { callMultiple, getAvailableModels } = require('./llm-adapters');
+
+// Detect if running inside Electron
+const isElectron = !!(process.versions && process.versions.electron);
+
+// Conditionally load Electron-dependent modules
+let dbModule = null;
+if (isElectron) {
+  try {
+    dbModule = require('../db/database');
+  } catch (e) {
+    console.warn('[API] Database module not available (standalone mode)');
+  }
+}
 
 let server = null;
 let app = null;
@@ -51,14 +61,11 @@ function downloadImage(url, filepath) {
   });
 }
 
-// Image generation via main process
+// Image generation via main process (Electron only)
 async function generateImageViaIpc(prompt, saveTo) {
-  // Import generateImage from main - deferred to avoid circular dependency
   const { generateImage } = require('../main');
-
   const result = await generateImage(prompt, saveTo);
 
-  // Save images if requested
   if (result.success && result.images && result.images.length > 0 && saveTo) {
     try {
       if (!fs.existsSync(saveTo)) {
@@ -73,15 +80,12 @@ async function generateImageViaIpc(prompt, saveTo) {
         const filepath = path.join(saveTo, filename);
 
         if (img.src.startsWith('data:')) {
-          // Base64 image
           const base64Data = img.src.replace(/^data:image\/\w+;base64,/, '');
           fs.writeFileSync(filepath, Buffer.from(base64Data, 'base64'));
           savedPaths.push(filepath);
         } else if (img.src.startsWith('blob:')) {
-          // Cannot save blob URLs from main process
           savedPaths.push({ error: 'Blob URLs cannot be saved directly', src: img.src });
         } else if (img.src.startsWith('http')) {
-          // Download from URL
           await downloadImage(img.src, filepath);
           savedPaths.push(filepath);
         }
@@ -95,6 +99,12 @@ async function generateImageViaIpc(prompt, saveTo) {
   return result;
 }
 
+// Chat via main process (Electron only)
+async function sendChatViaIpc(platform, message, profile) {
+  const { sendChatMessage } = require('../main');
+  return await sendChatMessage(platform, message, profile);
+}
+
 /**
  * Create and configure Express app
  */
@@ -105,6 +115,10 @@ function createApp() {
   app.use(cors());
   app.use(express.json());
 
+  // Serve static UI files
+  const uiPath = path.resolve(__dirname, '../../ui');
+  app.use(express.static(uiPath));
+
   // Request logging
   app.use((req, res, next) => {
     console.log(`[API] ${req.method} ${req.path}`);
@@ -113,191 +127,195 @@ function createApp() {
 
   // Health check
   app.get('/health', (req, res) => {
+    const models = getAvailableModels();
     res.json({
       status: 'ok',
-      version: '1.0.0',
+      version: '2.0.0-faza1',
+      mode: isElectron ? 'electron' : 'standalone',
+      models,
       timestamp: new Date().toISOString()
     });
   });
 
-  // Get available platforms
-  app.get('/platforms', (req, res) => {
-    const { AI_PLATFORMS } = require('../main');
-    res.json(AI_PLATFORMS);
+  // ============================================================
+  // FAZA 1: Multi-LLM Chat API
+  // ============================================================
+
+  // GET /api/models - Available models and their status
+  app.get('/api/models', (req, res) => {
+    res.json(getAvailableModels());
   });
 
-  // Get conversation history
-  app.get('/history', (req, res) => {
+  // POST /api/chat - Send prompt to multiple models in parallel
+  app.post('/api/chat', async (req, res) => {
     try {
-      const { platform, profile, limit, offset } = req.query;
-      const history = getHistory({
-        platform,
-        profile,
-        limit: limit ? parseInt(limit) : undefined,
-        offset: offset ? parseInt(offset) : undefined
-      });
-      res.json(history);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Get specific conversation with messages
-  app.get('/history/:id', (req, res) => {
-    try {
-      const conversationId = parseInt(req.params.id);
-      const messages = getMessages(conversationId);
-      res.json({
-        conversation_id: conversationId,
-        messages
-      });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Full-text search
-  app.get('/search', (req, res) => {
-    try {
-      const { q, platform, profile, limit } = req.query;
-
-      if (!q) {
-        return res.status(400).json({ error: 'Query parameter "q" is required' });
-      }
-
-      const results = searchMessages(q, {
-        platform,
-        profile,
-        limit: limit ? parseInt(limit) : undefined
-      });
-
-      res.json({
-        query: q,
-        count: results.length,
-        results
-      });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Get statistics
-  app.get('/stats', (req, res) => {
-    try {
-      const stats = getStats();
-      res.json(stats);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Save conversation (for manual/import use)
-  app.post('/conversations', (req, res) => {
-    try {
-      const { platform, profile, external_id, title, metadata } = req.body;
-
-      if (!platform) {
-        return res.status(400).json({ error: 'platform is required' });
-      }
-
-      const id = saveConversation(
-        platform,
-        profile || 'default',
-        external_id || `manual-${Date.now()}`,
-        title || 'Untitled',
-        metadata
-      );
-
-      res.json({ success: true, id });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Save message to conversation
-  app.post('/conversations/:id/messages', (req, res) => {
-    try {
-      const conversationId = parseInt(req.params.id);
-      const { role, content, metadata } = req.body;
-
-      if (!role || !content) {
-        return res.status(400).json({ error: 'role and content are required' });
-      }
-
-      const id = saveMessage(conversationId, role, content, metadata);
-      res.json({ success: true, id });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // POST /chat/:platform - Send message to AI platform
-  // This will need to interact with the webview in the renderer process
-  app.post('/chat/:platform', async (req, res) => {
-    try {
-      const { platform } = req.params;
-      const { message, profile } = req.body;
-
-      if (!message) {
-        return res.status(400).json({ error: 'message is required' });
-      }
-
-      // TODO: Implement webview interaction via IPC
-      // For now, return a placeholder
-      res.json({
-        status: 'pending',
-        message: 'Chat via API not yet implemented. Use the GUI.',
-        platform,
-        profile: profile || 'default'
-      });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // POST /images/generate - Generate image using Grok Imagine
-  // This endpoint sends a prompt to Grok Imagine and returns the generated image
-  app.post('/images/generate', async (req, res) => {
-    try {
-      const { prompt, save_to } = req.body;
+      const { prompt, models, system, max_tokens } = req.body;
 
       if (!prompt) {
         return res.status(400).json({ error: 'prompt is required' });
       }
 
-      // Send to main process via IPC (will be implemented)
-      const result = await generateImageViaIpc(prompt, save_to);
-
-      if (result.success) {
-        res.json({
-          success: true,
-          images: result.images,
-          prompt: prompt,
-          saved_to: result.saved_to
-        });
-      } else {
-        res.status(500).json({ error: result.error });
+      if (!models || !Array.isArray(models) || models.length === 0) {
+        return res.status(400).json({ error: 'models must be a non-empty array, e.g. ["claude", "gpt"]' });
       }
+
+      console.log(`[API] /api/chat prompt="${prompt.substring(0, 60)}..." models=[${models.join(',')}]`);
+
+      const results = await callMultiple(prompt, models, {
+        system,
+        max_tokens: max_tokens || 1024
+      });
+
+      res.json({
+        success: true,
+        prompt,
+        results,
+        timestamp: new Date().toISOString()
+      });
     } catch (error) {
+      console.error('[API] /api/chat error:', error);
       res.status(500).json({ error: error.message });
     }
   });
 
-  // GET /images/generate - Info about the endpoint
-  app.get('/images/generate', (req, res) => {
-    res.json({
-      endpoint: 'POST /images/generate',
-      description: 'Generate images using Grok Imagine (web automation)',
-      parameters: {
-        prompt: 'Text description of the image to generate (required)',
-        save_to: 'Optional folder path to save the image'
-      },
-      example: {
-        prompt: 'A futuristic city at sunset',
-        save_to: 'D:/AI-Images'
-      },
-      note: 'Requires Grok Imagine tab to be logged in with X Premium account'
+  // ============================================================
+  // Electron-dependent endpoints (only work inside Electron)
+  // ============================================================
+
+  if (isElectron && dbModule) {
+    const { getHistory, getMessages, searchMessages, getStats, saveConversation, saveMessage } = dbModule;
+
+    // Get available platforms
+    app.get('/platforms', (req, res) => {
+      const { AI_PLATFORMS } = require('../main');
+      res.json(AI_PLATFORMS);
     });
+
+    // Get conversation history
+    app.get('/history', (req, res) => {
+      try {
+        const { platform, profile, limit, offset } = req.query;
+        const history = getHistory({
+          platform,
+          profile,
+          limit: limit ? parseInt(limit) : undefined,
+          offset: offset ? parseInt(offset) : undefined
+        });
+        res.json(history);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Get specific conversation with messages
+    app.get('/history/:id', (req, res) => {
+      try {
+        const conversationId = parseInt(req.params.id);
+        const messages = getMessages(conversationId);
+        res.json({ conversation_id: conversationId, messages });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Full-text search
+    app.get('/search', (req, res) => {
+      try {
+        const { q, platform, profile, limit } = req.query;
+        if (!q) return res.status(400).json({ error: 'Query parameter "q" is required' });
+        const results = searchMessages(q, { platform, profile, limit: limit ? parseInt(limit) : undefined });
+        res.json({ query: q, count: results.length, results });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Get statistics
+    app.get('/stats', (req, res) => {
+      try {
+        res.json(getStats());
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Save conversation
+    app.post('/conversations', (req, res) => {
+      try {
+        const { platform, profile, external_id, title, metadata } = req.body;
+        if (!platform) return res.status(400).json({ error: 'platform is required' });
+        const id = saveConversation(platform, profile || 'default', external_id || `manual-${Date.now()}`, title || 'Untitled', metadata);
+        res.json({ success: true, id });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Save message to conversation
+    app.post('/conversations/:id/messages', (req, res) => {
+      try {
+        const conversationId = parseInt(req.params.id);
+        const { role, content, metadata } = req.body;
+        if (!role || !content) return res.status(400).json({ error: 'role and content are required' });
+        const id = saveMessage(conversationId, role, content, metadata);
+        res.json({ success: true, id });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Chat via webview (Electron IPC)
+    app.post('/chat/:platform', async (req, res) => {
+      try {
+        const { platform } = req.params;
+        const { message, profile } = req.body;
+        if (!message) return res.status(400).json({ error: 'message is required' });
+
+        const validPlatforms = ['deepseek', 'kimi', 'qwen', 'chatgpt', 'grok', 'claude', 'gemini', 'manus'];
+        if (!validPlatforms.includes(platform.toLowerCase())) {
+          return res.status(400).json({ error: `Invalid platform. Valid: ${validPlatforms.join(', ')}` });
+        }
+
+        const result = await sendChatViaIpc(platform.toLowerCase(), message, profile || 'default');
+        if (result.success) {
+          res.json({ success: true, platform, profile: profile || 'default', prompt: message, response: result.response, timestamp: new Date().toISOString() });
+        } else {
+          res.status(500).json({ success: false, error: result.error, platform });
+        }
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Image generation
+    app.post('/images/generate', async (req, res) => {
+      try {
+        const { prompt, save_to } = req.body;
+        if (!prompt) return res.status(400).json({ error: 'prompt is required' });
+        const result = await generateImageViaIpc(prompt, save_to);
+        if (result.success) {
+          res.json({ success: true, images: result.images, prompt, saved_to: result.saved_to });
+        } else {
+          res.status(500).json({ error: result.error });
+        }
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    app.get('/images/generate', (req, res) => {
+      res.json({
+        endpoint: 'POST /images/generate',
+        description: 'Generate images using Grok Imagine (web automation)',
+        parameters: { prompt: 'required', save_to: 'optional folder path' },
+        note: 'Requires Electron mode with Grok tab logged in'
+      });
+    });
+  }
+
+  // Serve index.html for root
+  app.get('/', (req, res) => {
+    res.sendFile(path.resolve(uiPath, 'index.html'));
   });
 
   // 404 handler
@@ -315,7 +333,7 @@ function createApp() {
 }
 
 /**
- * Start API server
+ * Start API server with port fallback
  */
 function startApiServer(port = 8080) {
   return new Promise((resolve, reject) => {
@@ -323,14 +341,25 @@ function startApiServer(port = 8080) {
 
     server = app.listen(port, '127.0.0.1', () => {
       console.log(`[API] Server listening on http://127.0.0.1:${port}`);
+      console.log(`[API] Mode: ${isElectron ? 'Electron' : 'Standalone'}`);
+      console.log(`[API] UI: http://127.0.0.1:${port}/`);
       resolve(server);
     });
 
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
-        console.error(`[API] Port ${port} is already in use`);
+        console.warn(`[API] Port ${port} is already in use, trying ${port + 1}...`);
+        server = app.listen(port + 1, '127.0.0.1', () => {
+          console.log(`[API] Server listening on http://127.0.0.1:${port + 1} (fallback)`);
+          resolve(server);
+        });
+        server.on('error', (err2) => {
+          console.error(`[API] Fallback port ${port + 1} also failed:`, err2.message);
+          resolve(null);
+        });
+      } else {
+        reject(err);
       }
-      reject(err);
     });
   });
 }
@@ -344,6 +373,24 @@ function stopApiServer() {
     server = null;
     console.log('[API] Server stopped');
   }
+}
+
+// If run directly (standalone mode), start server immediately
+if (require.main === module) {
+  const port = parseInt(process.env.PORT || '8080');
+  console.log('[API] Starting in standalone mode...');
+  startApiServer(port).then((srv) => {
+    if (srv) {
+      const models = getAvailableModels();
+      console.log('[API] Available models:');
+      for (const [name, info] of Object.entries(models)) {
+        console.log(`  ${name}: ${info.available ? 'OK' : 'NOT CONFIGURED'}${info.note ? ` (${info.note})` : ''}`);
+      }
+    }
+  }).catch(err => {
+    console.error('[API] Failed to start:', err);
+    process.exit(1);
+  });
 }
 
 module.exports = {
