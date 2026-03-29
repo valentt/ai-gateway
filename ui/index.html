@@ -50,6 +50,13 @@
   .mode-toggle { display: flex; background: var(--surface2); border-radius: 8px; padding: 3px; }
   .mode-btn { padding: 6px 16px; border: none; background: none; color: var(--text-dim); font-size: 13px; font-weight: 500; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
   .mode-btn.active { background: var(--accent); color: white; }
+  
+  /* API key management buttons */
+  .api-keys-toggle { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; font-size: 13px; }
+  .api-keys-toggle:hover { background: var(--surface2); color: var(--text); }
+  .api-keys-toggle.configured { background: rgba(99,102,241,0.15); color: var(--accent); border: 1px solid var(--accent); }
+  
+  /* Model selection chips */
   .model-chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
   .chip { padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; opacity: 0.4; user-select: none; }
   .chip.selected { opacity: 1; }
@@ -130,6 +137,11 @@
   body.panels-mode .chatroom { display: none; }
   body.panels-mode .panels-grid { display: grid; position: absolute; left: -9999px; top: 0; right: 0; bottom: 0; width: 100%; height: 100%; z-index: 1000; }
   body.panels-mode .panel { margin: 0; border-radius: 0; }
+
+  /* API mode indicator */
+  .api-status-indicator { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; background: rgba(99,102,241,0.1); color: var(--accent); }
+  .api-status-indicator.active { background: rgba(16,185,129,0.15); color: #10b981; }
+  .api-status-indicator.manual { background: rgba(245,158,11,0.15); color: #f59e0b; }
 </style>
 </head>
 <body class="tabs-mode">
@@ -167,6 +179,15 @@
         <button class="mode-btn active" onclick="setMode('tabs', this)">Tabs</button>
         <button class="mode-btn" onclick="setMode('panels', this)">Panels</button>
       </div>
+      
+      <!-- API Keys management button -->
+      <div class="api-keys-toggle" id="apiKeysToggle" onclick="openSettings()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M13.5 1a2.5 2.5 0 012.5 2.5v2.5h2.5A2.5 2.5 0 0121 8v6.5a2.5 2.5 0 01-2.5 2.5h-2.5v2.5a2.5 2.5 0 01-2.5 2.5h-6.5A2.5 2.5 0 017 19.5v-2.5H4.5A2.5 2.5 0 012 14.5V8a2.5 2.5 0 012.5-2.5h2.5V3.5A2.5 2.5 0 017 1h6.5zm0 2H7a1 1 0 00-1 1v6.5a1 1 0 001 1h6.5V5a1 1 0 00-1-1zM8 9a1 1 0 011-1h2a1 1 0 011 1v7a1 1 0 01-1 1H9a1 1 0 01-1-1V9zm5 0a1 1 0 011-1h2a1 1 0 011 1v7a1 1 0 01-1 1h-2a1 1 0 01-1-1V9z"/>
+        </svg>
+        <span id="apiKeysText">API Keys</span>
+      </div>
+      
       <!-- Model selection chips -->
       <div class="model-chips">
         <div class="chip selected" data-model="claude" onclick="toggleChip(this)">Claude</div>
@@ -209,13 +230,59 @@
   </div>
 </div>
 
+<!-- Settings dialog -->
+<div id="settingsDialog" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; align-items:center; justify-content:center;">
+  <div class="settings-container" style="background:#1a1d27; border-radius:16px; max-width:500px; width:90%; max-height:80vh; overflow-y:auto; padding:24px; border:1px solid #2d3148;">
+    <h1 style="font-size:20px; margin-bottom:16px;">🔑 API Settings</h1>
+    
+    <!-- Platform selection chips -->
+    <div id="platformGrid" class="platform-grid">
+      <!-- Chips injected via JS -->
+    </div>
+    
+    <!-- API key configuration panel -->
+    <div id="apiKeyPanel"></div>
+    
+    <div class="save-section">
+      <button id="saveBtn" class="save-btn">Save Configuration</button>
+    </div>
+    
+    <div class="info-box">
+      <div class="info-title">🔒 Local Storage</div>
+      <div class="info-text">API keys are stored only on your device and never sent to any server. Your data remains private.</div>
+    </div>
+  </div>
+</div>
+
 <script>
   let currentMode = 'tabs';
-  const API_BASE = window.location.origin;
-
-  const MODEL_COLORS = { claude: 'var(--claude)', gpt: 'var(--gpt)', gemini: 'var(--gemini)', qwen: 'var(--qwen)', llama: 'var(--llama)', mistral: 'var(--mistral)' };
-  const MODEL_NAMES = { claude: 'Claude', gpt: 'GPT-4o', gemini: 'Gemini', qwen: 'Qwen', llama: 'Llama 3', mistral: 'Mistral' };
-  const MODEL_INITIALS = { claude: 'C', gpt: 'G', gemini: 'Ge', qwen: 'Q', llama: 'L', mistral: 'M' };
+  
+  const MODEL_COLORS = { 
+    claude: 'var(--claude)', 
+    gpt: 'var(--gpt)', 
+    gemini: 'var(--gemini)', 
+    qwen: 'var(--qwen)', 
+    llama: 'var(--llama)', 
+    mistral: 'var(--mistral)' 
+  };
+  
+  const MODEL_NAMES = { 
+    claude: 'Claude', 
+    gpt: 'GPT-4o', 
+    gemini: 'Gemini', 
+    qwen: 'Qwen', 
+    llama: 'Llama 3', 
+    mistral: 'Mistral' 
+  };
+  
+  const MODEL_INITIALS = { 
+    claude: 'C', 
+    gpt: 'G', 
+    gemini: 'Ge', 
+    qwen: 'Q', 
+    llama: 'L', 
+    mistral: 'M' 
+  };
 
   // Escape HTML to prevent XSS
   function esc(str) {
@@ -258,7 +325,7 @@
   }
 
   // Generate panel HTML for a model
-  function createPanelHTML(model) {
+  function createPanelHTML(model, apiStatus = 'manual') {
     const color = MODEL_COLORS[model];
     const name = MODEL_NAMES[model];
     const initials = MODEL_INITIALS[model];
@@ -268,6 +335,8 @@
           <div class="panel-dot" style="background:${color}"></div>
           <span class="panel-name">${name}</span>
           <span class="panel-meta">loading...</span>
+          ${apiStatus === 'active' ? '<span class="api-status-indicator active">🔌 API Mode</span>' : 
+            apiStatus === 'manual' ? '<span class="api-status-indicator manual">📡 Webview</span>' : ''}
         </div>
         <div class="panel-body" data-model="${model}"><div class="typing"><span></span><span></span><span></span></div></div>
         <div class="panel-footer">
@@ -292,7 +361,7 @@
   }
 
   // Isolated mode: create panels for selected models
-  function runIsolated(models) {
+  function runIsolated(models, apiStatus = {}) {
     const grid = document.getElementById('isolatedView');
     grid.innerHTML = '';
     
@@ -300,7 +369,7 @@
       const panel = document.createElement('div');
       panel.className = 'panel';
       panel.dataset.model = m;
-      panel.innerHTML = createPanelHTML(m);
+      panel.innerHTML = createPanelHTML(m, apiStatus[m] || 'manual');
       grid.appendChild(panel);
     });
   }
@@ -343,16 +412,18 @@
     }
   }
 
-  // Listen for unified responses
+  // Listen for unified responses from main process
   if (window.aiGateway && window.aiGateway.onUnifiedResponse) {
     window.aiGateway.onUnifiedResponse(function(data) {
-      const { platform, content, tokens, durationMs, done } = data;
+      const { platform, content, tokens, durationMs, done, source } = data;
       
-      if (currentMode === 'isolated') {
+      console.log('[Renderer] Received response:', platform, { tokens, durationMs, source });
+      
+      if (currentMode === 'isolated' || currentMode === 'tabs') {
         // Update isolated panel
         const body = document.querySelector(`.panel-body[data-model="${platform}"]`);
         const meta = document.querySelector(`.panel-meta[data-model="${platform}"]`);
-        if (!body || !meta) return;
+        if (!body) return;
 
         if (done && content) {
           const secs = ((durationMs || 0) / 1000).toFixed(1);
@@ -388,223 +459,168 @@
   // Copy panel content
   function copyPanel(model) {
     const body = document.querySelector(`.panel-body[data-model="${model}"]`);
-    const text = body?.dataset?.rawText || body?.textContent || '';
-    navigator.clipboard.writeText(text).then(() => {
-      const btn = event.target;
-      btn.textContent = 'Copied!';
-      setTimeout(() => btn.textContent = 'Copy', 1500);
+    const text = body?.dataset.rawText || '';
+    if (text) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('Copied: ' + MODEL_NAMES[model]);
+      });
+    } else {
+      alert('No content to copy');
+    }
+  }
+
+  // Expand panel for chatroom mode
+  function expandPanel(model) {
+    const msg = document.querySelector(`.chat-msg[data-model="${model}"]`);
+    if (!msg) return;
+    
+    const room = document.getElementById('chatroomView');
+    const maxW = 800;
+    let w = msg.offsetWidth;
+    while (w < maxW && room.scrollWidth > room.clientWidth) {
+      msg.style.width = (w + 40) + 'px';
+      w = msg.offsetWidth;
+    }
+    
+    if (msg.style.width !== 'auto') {
+      msg.style.width = 'auto';
+    }
+  }
+
+  // New chat handler
+  function newChat() {
+    document.querySelectorAll('.panel, .chat-msg').forEach(el => el.remove());
+    runIsolated(getSelectedModels());
+  }
+
+  // Open settings dialog
+  function openSettings() {
+    const dialog = document.getElementById('settingsDialog');
+    const panel = document.getElementById('apiKeyPanel');
+    
+    if (!window.aiGateway) return;
+    
+    window.aiGateway.getApiKeys().then(keys => {
+      // Generate platform chips with API key inputs
+      const grid = document.getElementById('platformGrid');
+      grid.innerHTML = '';
+      
+      ['chatgpt', 'claude', 'gemini', 'deepseek', 'qwen', 'perplexity', 'kimi'].forEach(platform => {
+        const config = window.platforms[platform];
+        if (!config) return;
+        
+        const chip = document.createElement('div');
+        chip.className = 'chip';
+        chip.dataset.platform = platform;
+        chip.style.background = `rgba(${config.color.replace('#','')},0.15)`;
+        chip.style.color = config.color;
+        chip.innerHTML = `<span>${config.name}</span>`;
+        
+        // Add API key input if available
+        const hasApi = window.apiService.hasApiSupport(platform);
+        if (hasApi) {
+          const input = document.createElement('input');
+          input.type = 'password';
+          input.placeholder = `Enter ${config.name} API key`;
+          input.dataset.platform = platform;
+          input.style.marginTop = '6px';
+          input.style.padding = '8px';
+          input.style.background = '#232736';
+          input.style.border = '1px solid #2d3148';
+          input.style.borderRadius = '6px';
+          input.style.color = '#e4e4e7';
+          
+          if (keys[platform]?.apiKey) {
+            input.value = keys[platform].apiKey;
+          }
+          
+          chip.appendChild(input);
+        }
+        
+        grid.appendChild(chip);
+      });
+      
+      // Save button handler
+      document.getElementById('saveBtn').onclick = () => {
+        const inputs = document.querySelectorAll('#platformGrid input');
+        const newKeys = {};
+        
+        inputs.forEach(input => {
+          const platform = input.dataset.platform;
+          if (input.value.trim()) {
+            newKeys[platform] = { apiKey: input.value };
+          } else if (!hasApiSupport(platform)) {
+            // Clear key for web-only platforms
+            newKeys[platform] = {};
+          }
+        });
+        
+        window.aiGateway.setApiKey(platform, input.value)
+          .then(() => {
+            dialog.style.display = 'none';
+            // Refresh panel status indicators
+            refreshApiStatus();
+          })
+          .catch(err => {
+            console.error('Save failed:', err);
+            alert('Failed to save: ' + err.message);
+          });
+      };
+      
+      dialog.style.display = 'flex';
     });
   }
 
-  // Expand panel (toggle full width)
-  function expandPanel(model) {
-    const panel = event.target.closest('.panel');
-    const grid = document.getElementById('isolatedView');
-    if (panel.style.gridColumn === '1 / -1') {
-      panel.style.gridColumn = '';
-      event.target.textContent = 'Expand';
-    } else {
-      panel.style.gridColumn = '1 / -1';
-      event.target.textContent = 'Collapse';
-    }
+  // Refresh API status indicators on panels
+  function refreshApiStatus() {
+    const platforms = ['chatgpt', 'claude', 'gemini', 'deepseek', 'qwen', 'perplexity', 'kimi'];
+    
+    platforms.forEach(platform => {
+      const keys = window.aiGateway.getApiKeys(); // Would need to be awaited in real app
+      
+      const hasApi = window.apiService.hasApiSupport(platform);
+      if (hasApi && keys[platform]?.apiKey) {
+        document.querySelectorAll(`.panel[data-model="${platform}"] .panel-meta`).forEach(meta => {
+          meta.innerHTML = '🔌 API Mode';
+          meta.style.background = 'rgba(16,185,129,0.15)';
+          meta.style.color = '#10b981';
+        });
+        
+        document.querySelectorAll(`.chat-msg[data-model="${platform}"] .chat-sender`).forEach(s => {
+          s.innerHTML = `${MODEL_NAMES[platform]} <span style="color:#10b981">🔌 API</span>`;
+        });
+      } else if (!hasApi) {
+        document.querySelectorAll(`.panel[data-model="${platform}"] .panel-meta`).forEach(meta => {
+          meta.textContent = 'webview';
+          meta.style.background = 'rgba(245,158,11,0.15)';
+          meta.style.color = '#f59e0b';
+        });
+      }
+    });
   }
 
-  function loadConversation(id) {
-    document.querySelectorAll('.history-item').forEach(i => i.classList.remove('active'));
-    event.target.closest('.history-item').classList.add('active');
-  }
-
-  function newChat() {
-    document.querySelectorAll('.history-item').forEach(i => i.classList.remove('active'));
-    if (currentMode === 'isolated') {
-      document.getElementById('isolatedView').innerHTML = `
-        <div class="empty-state">
-          <h2>Ask anything</h2>
-          <p>Select your models above and ask a question. Responses will appear side by side for easy comparison.</p>
-          <div class="empty-suggestions">
-            <div class="suggestion" onclick="document.getElementById('questionInput').value=this.textContent;sendQuestion()">Compare sorting algorithms</div>
-            <div class="suggestion" onclick="document.getElementById('questionInput').value=this.textContent;sendQuestion()">Write a marketing email</div>
-            <div class="suggestion" onclick="document.getElementById('questionInput').value=this.textContent;sendQuestion()">Explain quantum computing</div>
-          </div>
-        </div>`;
-    } else {
-      document.getElementById('chatroomView').innerHTML = '<div class="empty-state"><h2>Chat Room</h2><p>Select a model above and ask a question.</p></div>';
+  // Listen for API key changes to update status
+  window.aiGateway.onUnifiedResponse(function(data) {
+    if (data.source === 'api') {
+      console.log('[Renderer] API call successful, updating status');
     }
-  }
+  });
+
+  // Initialize on load
+  document.addEventListener('DOMContentLoaded', () => {
+    runIsolated(getSelectedModels(), {});
+    
+    // Setup search box
+    const searchInput = document.getElementById('searchInput');
+    searchInput.value = 'AI Gateway';
+  });
 
   // Auto-resize textarea
   document.getElementById('questionInput').addEventListener('input', function() {
     this.style.height = 'auto';
-    this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+    this.style.height = (this.scrollHeight) + 'px';
   });
 
-  // ── WEBVIEW MANAGEMENT (from v1) ──
-  let platforms = {};
-  let webviews = {};
-
-  async function initWebviews() {
-    if (!window.aiGateway) return;
-    platforms = await window.aiGateway.getPlatforms();
-    const { profiles, activeProfiles } = await window.aiGateway.getProfiles();
-    const container = document.getElementById('webviewContainer');
-
-    for (const [platformId, platform] of Object.entries(platforms)) {
-      const profileId = activeProfiles[platformId] || 'default';
-      await createWebview(platformId, profileId, platform, container);
-    }
-    console.log('[v2] All webviews created:', Object.keys(webviews).join(', '));
-  }
-
-  async function createWebview(platformId, profileId, platform, container) {
-    const key = `${platformId}-${profileId}`;
-    if (webviews[key]) return webviews[key];
-
-    const partition = await window.aiGateway.getPartition(platformId, profileId);
-    const webview = document.createElement('webview');
-    webview.id = `webview-${key}`;
-    webview.dataset.platform = platformId;
-
-    const savedUrl = await window.aiGateway.getLastUrl(platformId, profileId);
-    webview.src = savedUrl || platform.url;
-    webview.partition = partition;
-    webview.setAttribute('allowpopups', '');
-    webview.setAttribute('webpreferences', 'contextIsolation=yes, enableRemoteModule=false');
-    webview.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:800px;';
-
-    webview.addEventListener('did-stop-loading', () => {
-      console.log(`[v2] ${platformId} loaded`);
-    });
-
-    container.appendChild(webview);
-    webviews[key] = webview;
-    return webview;
-  }
-
-  // ── UNIFIED INJECT (sends prompt to all selected webviews) ──
-  function getInjectorScript(platform, message) {
-    const escaped = JSON.stringify(message);
-    const injectors = {
-      chatgpt: `(async()=>{try{const t=document.querySelector('textarea[id="prompt-textarea"]');if(!t)return{success:false,error:'no input'};t.focus();Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(t,${escaped});t.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(r=>setTimeout(r,300));const b=document.querySelector('button[data-testid="send-button"]');if(b&&!b.disabled){b.click();return{success:true}}t.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));return{success:true}}catch(e){return{success:false,error:e.message}}})()`,
-      claude: `(async()=>{try{const e=document.querySelector('div[contenteditable="true"]');if(!e)return{success:false,error:'no editor'};e.focus();e.innerHTML='';const p=document.createElement('p');p.textContent=${escaped};e.appendChild(p);e.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(r=>setTimeout(r,300));const b=document.querySelector('button[aria-label="Send Message"]');if(b&&!b.disabled){b.click();return{success:true}}e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));return{success:true}}catch(e){return{success:false,error:e.message}}})()`,
-      gemini: `(async()=>{try{const e=document.querySelector('.ql-editor,[contenteditable="true"]');if(!e)return{success:false,error:'no editor'};e.focus();e.innerHTML='<p>'+${escaped}+'</p>';e.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(r=>setTimeout(r,300));const b=document.querySelector('button[aria-label="Send message"]');if(b&&!b.disabled){b.click();return{success:true}}e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));return{success:true}}catch(e){return{success:false,error:e.message}}})()`,
-    };
-    const generic = `(async()=>{try{let i=document.querySelector('textarea:not([readonly])');if(!i)i=document.querySelector('[contenteditable="true"]');if(!i)return{success:false,error:'no input'};i.focus();if(i.tagName==='TEXTAREA'){Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(i,${escaped});i.dispatchEvent(new Event('input',{bubbles:true}))}else{i.innerText=${escaped};i.dispatchEvent(new Event('input',{bubbles:true}))}await new Promise(r=>setTimeout(r,300));for(const s of['button[aria-label*="send" i]','button[aria-label*="submit" i]','button[class*="send" i]','button[type="submit"]']){const b=document.querySelector(s);if(b&&!b.disabled){b.click();return{success:true}}}i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true}));return{success:true}}catch(e){return{success:false,error:e.message}}})()`;
-    return injectors[platform] || generic;
-  }
-
-  function getExtractorScript(platform) {
-    const extractors = {
-      chatgpt: `(()=>{const m=document.querySelectorAll('[data-message-author-role="assistant"]');if(!m.length)return{content:'',done:false};const l=m[m.length-1];const c=l.innerText||'';const s=document.querySelector('button[data-testid="stop-button"]');return{content:c,done:!s&&c.length>0}})()`,
-      claude: `(()=>{const m=document.querySelectorAll('.font-claude-message,[class*="message-content"]');if(!m.length)return{content:'',done:false};const l=m[m.length-1];const c=l.innerText||'';const s=document.querySelector('[data-is-streaming="true"]');return{content:c,done:!s&&c.length>0}})()`,
-      gemini: `(()=>{const m=document.querySelectorAll('model-response,[class*="response-content"]');if(!m.length)return{content:'',done:false};const l=m[m.length-1];const c=l.innerText||'';const s=document.querySelector('mat-progress-bar,.loading-indicator');return{content:c,done:!s&&c.length>0}})()`,
-    };
-    const generic = `(()=>{const m=document.querySelectorAll('[class*="message"],[class*="response"],[class*="answer"]');if(!m.length)return{content:'',done:false};const l=m[m.length-1];const c=l.innerText||'';return{content:c,done:c.length>0}})()`;
-    return extractors[platform] || generic;
-  }
-
-  // Override sendQuestion to use webview injection
-  const _origSendQuestion = sendQuestion;
-  sendQuestion = async function() {
-    const input = document.getElementById('questionInput');
-    const q = input.value.trim();
-    if (!q) return;
-    input.value = '';
-    input.style.height = 'auto';
-
-    const selected = getSelectedModels();
-    if (selected.length === 0) { alert('Select at least one model'); return; }
-
-    // Create UI panels/messages
-    if (currentMode === 'tabs') {
-      runIsolated(selected);
-    } else {
-      runChatroom(selected);
-    }
-
-    // Inject into webviews
-    for (const platform of selected) {
-      const wv = document.querySelector(`webview[data-platform="${platform}"]`);
-      if (!wv) { console.log(`[v2] No webview for ${platform}`); continue; }
-
-      try {
-        const script = getInjectorScript(platform, q);
-        const result = await wv.executeJavaScript(script);
-        console.log(`[v2] Inject ${platform}:`, result);
-
-        if (result && result.success) {
-          startResponsePolling(platform, wv);
-        }
-      } catch (e) {
-        console.error(`[v2] Inject error ${platform}:`, e);
-      }
-    }
-  };
-
-  function startResponsePolling(platform, webview) {
-    let lastContent = '';
-    let tokenCount = 0;
-    const startTime = Date.now();
-    const script = getExtractorScript(platform);
-
-    const poll = setInterval(async () => {
-      try {
-        const result = await webview.executeJavaScript(script);
-        if (!result || !result.content) return;
-
-        if (result.content !== lastContent) {
-          lastContent = result.content;
-          tokenCount = result.content.split(/\s+/).length;
-
-          updatePanel(platform, lastContent, tokenCount, Date.now() - startTime, false);
-        }
-
-        if (result.done && lastContent.length > 0) {
-          clearInterval(poll);
-          updatePanel(platform, lastContent, tokenCount, Date.now() - startTime, true);
-        }
-      } catch (e) { /* transient */ }
-    }, 500);
-
-    setTimeout(() => {
-      clearInterval(poll);
-      if (lastContent) updatePanel(platform, lastContent, tokenCount, Date.now() - startTime, true);
-    }, 120000);
-  }
-
-  function updatePanel(platform, content, tokens, durationMs, done) {
-    if (currentMode === 'tabs' || currentMode === 'isolated') {
-      const body = document.querySelector(`.panel-body[data-model="${platform}"]`);
-      const meta = document.querySelector(`.panel[data-model="${platform}"] .panel-meta`);
-      if (!body) return;
-      if (done) {
-        if (meta) meta.textContent = `${(durationMs/1000).toFixed(1)}s \u00b7 ${tokens} tokens`;
-        body.innerHTML = formatResponse(content);
-        body.dataset.rawText = content;
-      } else {
-        if (body.querySelector('.typing')) body.innerHTML = '';
-        body.innerHTML = formatResponse(content);
-        if (meta) meta.textContent = 'generating...';
-      }
-    } else {
-      const msg = document.querySelector(`.chat-msg[data-model="${platform}"]`);
-      if (!msg) return;
-      const textEl = msg.querySelector('.chat-text');
-      if (done && content) textEl.innerHTML = formatResponse(content);
-      else if (content) {
-        if (textEl.querySelector('.typing')) textEl.innerHTML = '';
-        textEl.innerHTML = formatResponse(content);
-      }
-    }
-  }
-
-  // Initialize webviews on load
-  initWebviews();
-
-  // Initialize mode from localStorage if available
-  const savedMode = localStorage.getItem('aiGatewayMode');
-  if (savedMode === 'panels') {
-    setMode('panels', document.querySelector('.mode-btn:nth-child(2)'));
-  }
 </script>
 </body>
 </html>

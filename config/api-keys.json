@@ -1,0 +1,39 @@
+{
+  "chatgpt": {
+    "apiKey": null,
+    "organizationId": null,
+    "baseUrl": "https://api.openai.com/v1"
+  },
+  "claude": {
+    "apiKey": null,
+    "baseUrl": "https://api.anthropic.com/v1"
+  },
+  "gemini": {
+    "apiKey": null,
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta"
+  },
+  "grok": {
+    "apiKey": null,
+    "baseUrl": "https://api.x.ai/v1"
+  },
+  "deepseek": {
+    "apiKey": null,
+    "baseUrl": "https://api.deepseek.com/v1"
+  },
+  "kimi": {
+    "apiKey": null,
+    "baseUrl": "https://api.moonshot.cn/v1"
+  },
+  "qwen": {
+    "apiKey": null,
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  },
+  "perplexity": {
+    "apiKey": null,
+    "baseUrl": "https://api.perplexity.ai"
+  },
+  "manus": {
+    "apiKey": null,
+    "baseUrl": "https://api.manus.im/v1"
+  }
+}

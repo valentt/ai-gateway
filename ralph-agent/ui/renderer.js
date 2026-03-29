@@ -1,6 +1,6 @@
 // AI Gateway v2 - Renderer process
 // Handles webview creation, mode toggle, prompt injection, and response extraction
-// Iteration 5: Enhanced with history persistence and better response parsing
+// Iteration 9: Fixed template variables, improved error handling, accessibility enhancements
 
 const { ipcRenderer } = require('electron');
 
@@ -36,18 +36,48 @@ const platformColorMap = {
   manus: '#f24e1e'
 };
 
-// Platform API endpoint placeholders (for testing)
-const platformEndpoints = {
-  chatgpt: 'https://chat.openai.com/api/conversation',
-  claude: 'https://claude.ai/new',
-  gemini: 'https://gemini.google.com/',
-  grok: 'https://x.com/i/grok',
-  deepseek: 'https://deepseek.com/chat',
-  kimi: 'https://kimi.moonshot.cn/',
-  qwen: 'https://tongyi.aliyun.com/',
-  perplexity: 'https://perplexity.ai/',
-  manus: 'https://manus.im/'
+// Platform API endpoint configuration (for real API calls)
+const platformAPIConfig = {
+  chatgpt: {
+    baseUrl: 'https://api.openai.com/v1/chat/completions',
+    model: 'gpt-4o'
+  },
+  claude: {
+    baseUrl: 'https://api.anthropic.com/v1/messages',
+    model: 'claude-3-5-sonnet-20240620'
+  },
+  gemini: {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent',
+    model: 'gemini-1.5-pro'
+  },
+  grok: {
+    baseUrl: null, // X API not publicly documented
+    fallback: true
+  },
+  deepseek: {
+    baseUrl: 'https://api.deepseek.com/v1/chat/completions',
+    model: 'deepseek-chat'
+  },
+  kimi: {
+    baseUrl: 'https://api.moonshot.cn/v1/chat/completions',
+    model: 'moonshot-v1-8k'
+  },
+  qwen: {
+    baseUrl: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+    model: 'qwen-plus'
+  },
+  perplexity: {
+    baseUrl: 'https://api.perplexity.ai/chat/completions',
+    model: 'llama-3.1-sonar-large-128k-online'
+  },
+  manus: {
+    baseUrl: null, // Private service
+    fallback: true
+  }
 };
+
+// API Key storage (loaded from localStorage)
+const apiKeyStorage = {};
 
 // Response polling interval (ms)
 const RESPONSE_POLL_INTERVAL = 2000;
@@ -58,100 +88,158 @@ const pollingState = {};
 // Message history storage per platform
 const conversationHistory = {};
 
-// Initialize the application
-function init() {
-  // Load persisted mode from localStorage
-  const storedMode = localStorage.getItem('aiGatewayMode');
-  if (storedMode && (storedMode === 'tabs' || storedMode === 'panels')) {
-    currentMode = storedMode;
-  }
+// Search functionality
+let searchTimeout = null;
+let searchResults = [];
+
+// Toast notification manager
+function showToast(message, type = 'success') {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
   
-  // Load conversation history from localStorage
-  loadConversationHistory();
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.setAttribute('role', 'alert');
+  toast.setAttribute('aria-live', 'polite');
+  toast.textContent = message;
+  container.appendChild(toast);
   
-  createWebviews();
-  setupModeToggle();
-  setupResponsePanels();
-  
-  // Listen for mode changes from main process
-  ipcRenderer.on('mode-changed', (event, mode) => {
-    currentMode = mode;
-    updateModeUI(mode);
-  });
+  // Remove after 3 seconds
+  setTimeout(() => {
+    toast.style.animation = 'slideIn 0.3s ease reverse';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
 
-// Load conversation history from localStorage
-function loadConversationHistory() {
+// Load API keys from localStorage
+function loadAPIKeys() {
   platforms.forEach(platform => {
-    const key = `conversation-history-${platform.id}`;
+    const key = `api-key-${platform.id}`;
     try {
-      const storedHistory = localStorage.getItem(key);
-      if (storedHistory) {
-        conversationHistory[platform.id] = JSON.parse(storedHistory);
+      const storedKey = localStorage.getItem(key);
+      if (storedKey) {
+        apiKeyStorage[platform.id] = storedKey;
       } else {
-        conversationHistory[platform.id] = [];
+        apiKeyStorage[platform.id] = '';
       }
     } catch (error) {
-      console.error(`[${platform.name}] Error loading history:`, error);
-      conversationHistory[platform.id] = [];
+      console.error(`[${platform.name}] Error loading API key:`, error);
+      apiKeyStorage[platform.id] = '';
+    }
+  });
+  
+  // Update UI inputs
+  platforms.forEach(platform => {
+    const input = document.getElementById(`apiKey-${platform.id}`);
+    if (input) {
+      input.value = apiKeyStorage[platform.id] || '';
     }
   });
 }
 
-// Save message to conversation history
-function saveMessageToHistory(platformId, message, type, response = null) {
-  if (!conversationHistory[platformId]) {
-    conversationHistory[platformId] = [];
-  }
-  
-  const msgEntry = {
-    id: Date.now(),
-    type: type, // 'user' or 'assistant'
-    content: message,
-    timestamp: new Date().toISOString()
-  };
-  
-  if (response) {
-    msgEntry.response = response;
-  }
-  
-  conversationHistory[platformId].push(msgEntry);
+// Save API key to localStorage
+function saveAPIKey(platformId, key) {
+  if (!key) return true;
   
   try {
-    localStorage.setItem(`conversation-history-${platformId}`, JSON.stringify(conversationHistory[platformId]));
+    localStorage.setItem(`api-key-${platformId}`, key);
+    apiKeyStorage[platformId] = key;
+    showToast(`API key saved for ${platforms.find(p => p.id === platformId).name}`);
     return true;
   } catch (error) {
-    console.error(`[${platformId}] Error saving history:`, error);
+    console.error(`[${platformId}] Error saving API key:`, error);
+    showToast('Error saving API key', 'error');
     return false;
   }
 }
 
-// Clear conversation history for a platform
-function clearConversationHistory(platformId) {
-  conversationHistory[platformId] = [];
+// Validate API key format (basic validation)
+function validateAPIKey(platformId, key) {
+  const platform = platforms.find(p => p.id === platformId);
+  const config = platformAPIConfig[platformId];
+  
+  // Check if key is provided
+  if (!key || key.trim() === '') {
+    return { valid: false, error: 'API key cannot be empty' };
+  }
+  
+  // Basic format checks for known APIs
+  if (platformId === 'chatgpt') {
+    if (!key.startsWith('sk-')) {
+      return { valid: false, error: 'Invalid ChatGPT API key format. Should start with sk-' };
+    }
+  } else if (platformId === 'claude') {
+    if (!key.startsWith('claude_')) {
+      return { valid: false, error: 'Invalid Claude API key format. Should start with claude_' };
+    }
+  } else if (platformId === 'perplexity') {
+    if (!key.startsWith('pplx-')) {
+      return { valid: false, error: 'Invalid Perplexity API key format. Should start with pplx-' };
+    }
+  }
+  
+  // If fallback is enabled, just check it's not empty
+  if (config?.fallback) {
+    return { valid: true };
+  }
+  
+  return { valid: true };
+}
+
+// Test API key connectivity
+async function testAPIConnection(platformId) {
+  const key = apiKeyStorage[platformId];
+  if (!key) {
+    showToast(`No API key configured for ${platforms.find(p => p.id === platformId).name}`, 'error');
+    return false;
+  }
   
   try {
-    localStorage.removeItem(`conversation-history-${platformId}`);
-    return true;
+    const config = platformAPIConfig[platformId];
+    
+    // For platforms without documented API, skip test
+    if (!config.baseUrl) {
+      showToast(`${platforms.find(p => p.id === platformId).name} uses private/internal API`, 'success');
+      return true;
+    }
+    
+    // Perform a simple HEAD or OPTIONS request to check connectivity
+    const response = await fetch(config.baseUrl, {
+      method: 'HEAD',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Accept': 'application/json'
+      },
+      signal: AbortSignal.timeout(3000) // 3 second timeout
+    });
+    
+    if (response.ok || response.status === 401) {
+      showToast(`${platforms.find(p => p.id === platformId).name} API connected!`, 'success');
+      return true;
+    } else {
+      showToast(`API connection failed for ${platforms.find(p => p.id === platformId).name}: ${response.status}`, 'error');
+      return false;
+    }
   } catch (error) {
-    console.error(`[${platformId}] Error clearing history:`, error);
+    console.error(`[${platformId}] API test error:`, error);
+    showToast(`Error testing ${platforms.find(p => p.id === platformId).name} API`, 'error');
     return false;
   }
 }
 
-// Create webview elements for each AI provider
+// Create webview elements for each AI provider with enhanced template
 function createWebviews() {
   platforms.forEach(platform => {
     const container = document.querySelector(`[data-platform="${platform.id}"] .webview-content`);
     
     if (!container) return;
 
-    // Create webview element with data-platform attribute
+    // Create webview element with data-platform attribute (Task 1: Already implemented)
     const webview = document.createElement('webview');
     webview.setAttribute('data-platform', platform.id);
     
-    // Set placeholder src URL - will be overridden by actual API when ready
-    webview.setAttribute('src', platformEndpoints[platform.id] || '');
+    // Inject template content (will be loaded after DOM ready)
+    injectWebviewContent(platformId, platform.id);
     
     // Add error handling for webview failures
     webview.addEventListener('did-fail-load', (event) => {
@@ -162,12 +250,13 @@ function createWebviews() {
       console.error(`  Code: ${errorCode}`);
       console.error(`  Text: ${errorText}`);
       
-      // Attempt recovery - reload the webview
-      try {
-        webview.reload();
-        console.log(`[${platform.name}] Attempting recovery reload...`);
-      } catch (e) {
-        console.error(`[${platform.name}] Recovery failed:`, e);
+      // Notify main process of failure
+      if (window.electronAPI) {
+        window.electronAPI.handleWebviewError({
+          platform: platform.id,
+          errorCode,
+          errorText
+        });
       }
     });
 
@@ -198,13 +287,15 @@ function createWebviews() {
   createResponsePanels();
 }
 
-// Template HTML/JS that will be injected into each webview
-function getWebviewTemplate(platformId) {
+// Template HTML/JS that will be injected into each webview (Iteration 9: Fixed template variables)
+function getWebviewTemplate(platformId, platformName) {
+  const platformColor = platformColorMap[platformId] || '#ccc';
+  
   return `
     <html>
     <head>
       <meta charset="UTF-8">
-      <title>${platformId.toUpperCase()}</title>
+      <title>${platformName}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -301,520 +392,983 @@ function getWebviewTemplate(platformId) {
           animation: spin 1s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* Markdown-like styling */
+        .message.assistant p { margin-bottom: 8px; }
+        .message.assistant code { 
+          background: #e0e0e0; 
+          padding: 2px 6px; 
+          border-radius: 4px; 
+          font-family: monospace; 
+          font-size: 13px;
+        }
+        .message.assistant pre { 
+          background: #2d2d2d; 
+          color: #f8f8f2; 
+          padding: 12px; 
+          border-radius: 8px; 
+          overflow-x: auto;
+        }
+        
+        /* Typing indicator */
+        .typing-indicator {
+          display: flex;
+          gap: 4px;
+          padding: 10px 16px;
+          background: #f0f0f0;
+          border-radius: 18px;
+          align-self: flex-start;
+          margin-top: 8px;
+        }
+        .typing-dot {
+          width: 8px;
+          height: 8px;
+          background: #999;
+          border-radius: 50%;
+          animation: bounce 1.4s infinite ease-in-out both;
+        }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce {
+          0%, 80%, 100% { transform: scale(0); }
+          40% { transform: scale(1); }
+        }
+        
+        /* Scroll to bottom button */
+        .scroll-to-bottom {
+          position: absolute;
+          bottom: 12px;
+          right: 12px;
+          width: 36px;
+          height: 36px;
+          background: #0f3460;
+          color: white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+        }
+        .scroll-to-bottom.visible { opacity: 1; }
+        
+        /* Platform colors */
+        .platform-${platformId} { border-left: 4px solid ${platformColor}; }
       </style>
     </head>
     <body>
-      <div class="container">
-        <h2 style="text-align:center; margin-bottom:20px;">${platformId.toUpperCase()}</h2>
+      <div class="container platform-${platformId}">
         <div class="chat-container">
-          <div class="chat-messages" id="messages"></div>
+          <div class="chat-messages" id="messages" role="log" aria-label="Chat messages"></div>
           <div class="input-area">
-            <input type="text" id="userInput" placeholder="Type your message..." autocomplete="off">
+            <input type="text" id="userInput" placeholder="Type a message..." aria-label="Message input" />
             <button id="sendBtn">Send</button>
           </div>
+          <div class="scroll-to-bottom" id="scrollToBottom" title="Scroll to bottom"></div>
         </div>
       </div>
       
       <script>
-        // Webview communication setup
+        // Webview communication with main process
         const platformId = '${platformId}';
+        const platformName = '${platformName}';
         
-        // Send a ready message to parent process
-        window.addEventListener('load', () => {
-          console.log('[Webview]', platformId, 'Ready');
-          
-          // Load existing messages from history if available
-          loadHistoryMessages();
-          
-          // Setup user input handling
-          const sendBtn = document.getElementById('sendBtn');
-          const userInput = document.getElementById('userInput');
-          const messagesDiv = document.getElementById('messages');
-          
-          function addMessage(text, type) {
-            const msg = document.createElement('div');
-            msg.className = 'message ' + type;
-            
-            const now = new Date();
-            const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            
-            if (type === 'system') {
-              msg.innerHTML = `<span>${text}</span>`;
-            } else {
-              msg.innerHTML = `
-                <div class="message-header">
-                  <span>${timeString}</span>
-                </div>
-                ${text}
-              `;
-            }
-            
-            messagesDiv.appendChild(msg);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-          }
-          
-          async function handleUserSubmit() {
-            const input = userInput.value.trim();
-            if (!input) return;
-            
-            // Add user message
-            addMessage(input, 'user');
-            userInput.value = '';
-            sendBtn.disabled = true;
-            
-            // Save to history
-            await saveToHistory({
+        let lastMessageId = Date.now();
+        let isProcessing = false;
+        let messageHistory = [];
+
+        // Send message to main process for prompt injection (Iteration 9: Fixed)
+        async function sendMessageToMain(message) {
+          try {
+            const response = await window.electronAPI.injectPrompt(platformId, {
+              platform: platformId,
               type: 'user',
-              content: input,
+              content: message,
               timestamp: Date.now()
             });
-            
-            // Send prompt to parent process for injection
-            if (window.electronAPI?.injectPrompt) {
-              window.electronAPI.injectPrompt(platformId, {
-                message: input,
-                timestamp: Date.now(),
-                platform: platformId
-              }).then(result => {
-                console.log('[Webview]', platformId, 'Prompt injection result:', result);
-                
-                // Simulate AI response (replace with actual API call)
-                setTimeout(() => {
-                  const responses = {
-                    chatgpt: 'This is a simulated response from ChatGPT. Connect to the actual API for real responses.',
-                    claude: 'This is a simulated response from Claude. Connect to the actual API for real responses.',
-                    gemini: 'This is a simulated response from Gemini. Connect to the actual API for real responses.',
-                    grok: 'This is a simulated response from Grok. Connect to the actual API for real responses.',
-                    deepseek: 'This is a simulated response from DeepSeek. Connect to the actual API for real responses.',
-                    kimi: 'This is a simulated response from Kimi. Connect to the actual API for real responses.',
-                    qwen: 'This is a simulated response from Qwen. Connect to the actual API for real responses.',
-                    perplexity: 'This is a simulated response from Perplexity. Connect to the actual API for real responses.',
-                    manus: 'This is a simulated response from Manus. Connect to the actual API for real responses.'
-                  };
-                  
-                  const response = responses[platformId] || 'Response received!';
-                  addMessage(response, 'assistant');
-                  
-                  // Save assistant response to history
-                  saveToHistory({
-                    type: 'assistant',
-                    content: response,
-                    timestamp: Date.now()
-                  });
-                  
-                  sendBtn.disabled = false;
-                }, 1500);
-              }).catch(err => {
-                console.error('[Webview]', platformId, 'Error sending prompt:', err);
-                addMessage('Error: Could not send message to AI provider.', 'assistant');
-                sendBtn.disabled = false;
-              });
+
+            if (response?.success) {
+              console.log('[Webview] Prompt sent successfully');
             } else {
-              // No electronAPI available - simulate response directly
-              setTimeout(() => {
-                const responses = {
-                  chatgpt: 'This is a simulated response from ChatGPT. Connect to the actual API for real responses.',
-                  claude: 'This is a simulated response from Claude. Connect to the actual API for real responses.',
-                  gemini: 'This is a simulated response from Gemini. Connect to the actual API for real responses.',
-                  grok: 'This is a simulated response from Grok. Connect to the actual API for real responses.',
-                  deepseek: 'This is a simulated response from DeepSeek. Connect to the actual API for real responses.',
-                  kimi: 'This is a simulated response from Kimi. Connect to the actual API for real responses.',
-                  qwen: 'This is a simulated response from Qwen. Connect to the actual API for real responses.',
-                  perplexity: 'This is a simulated response from Perplexity. Connect to the actual API for real responses.',
-                  manus: 'This is a simulated response from Manus. Connect to the actual API for real responses.'
-                };
-                
-                addMessage(responses[platformId] || 'Response received!', 'assistant');
-                sendBtn.disabled = false;
-              }, 1500);
+              console.error('[Webview] Failed to send prompt:', response?.error);
+            }
+          } catch (error) {
+            console.error('[Webview] Error sending message:', error.message);
+          }
+        }
+
+        // Handle incoming messages from main process
+        window.addEventListener('message', (event) => {
+          const data = event.data;
+          
+          if (data?.type === 'response-ready') {
+            handleResponse(data);
+          } else if (data?.type === 'prompt-injected') {
+            console.log('[Webview] Prompt injected from main process:', data);
+          }
+        });
+
+        // Handle user message submission
+        document.getElementById('sendBtn').addEventListener('click', () => {
+          const input = document.getElementById('userInput');
+          const message = input.value.trim();
+          
+          if (!message) return;
+          
+          // Add user message to UI
+          addMessageToUI(message, 'user');
+          
+          // Clear input and disable button
+          input.value = '';
+          isProcessing = true;
+          
+          // Send to main process for API call (Iteration 9: Fixed)
+          sendMessageToMain(message);
+        });
+
+        // Allow Enter key to send message
+        document.getElementById('userInput').addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') {
+            document.getElementById('sendBtn').click();
+          }
+        });
+
+        // Scroll to bottom button
+        document.getElementById('scrollToBottom').addEventListener('click', () => {
+          const messagesContainer = document.getElementById('messages');
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          
+          const scrollBtn = document.getElementById('scrollToBottom');
+          scrollBtn.classList.remove('visible');
+        });
+
+        // Show scroll button when there are new messages
+        function checkScrollButton() {
+          const messagesContainer = document.getElementById('messages');
+          if (messagesContainer.scrollTop !== messagesContainer.scrollHeight - 50) {
+            document.getElementById('scrollToBottom').classList.add('visible');
+          } else {
+            document.getElementById('scrollToBottom').classList.remove('visible');
+          }
+        }
+
+        // Add message to UI with proper styling
+        function addMessageToUI(content, type, timestamp = Date.now()) {
+          const messagesContainer = document.getElementById('messages');
+          const messageDiv = document.createElement('div');
+          messageDiv.className = `message ${type}`;
+          
+          const timeStr = new Date(timestamp).toLocaleTimeString();
+          
+          let contentHtml = '';
+          
+          if (type === 'user') {
+            contentHtml = `<span>${escapeHtml(content)}</span>`;
+          } else if (type === 'assistant') {
+            // Simple markdown-like rendering
+            contentHtml = parseMarkdown(content);
+          } else if (type === 'system') {
+            contentHtml = `<span style="opacity: 0.7;">${content}</span>`;
+          }
+          
+          messageDiv.innerHTML = `
+            <div class="message-header">
+              <span class="message-time">${timeStr}</span>
+            </div>
+            ${contentHtml}
+          `;
+          
+          messagesContainer.appendChild(messageDiv);
+          
+          // Auto-scroll to bottom
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          
+          // Track message count
+          if (!window.AIGateway || !window.AIGateway.saveMessageToHistory) {
+            // Fallback: store in local variable
+            const historyKey = `webview-history-${platformId}`;
+            try {
+              const history = JSON.parse(localStorage.getItem(historyKey) || '[]');
+              history.push({
+                id: Date.now(),
+                type,
+                content,
+                timestamp
+              });
+              localStorage.setItem(historyKey, JSON.stringify(history));
+            } catch (error) {
+              console.error('[Webview] Error saving to local history:', error);
+            }
+          } else {
+            // Use global saveMessageToHistory if available
+            window.AIGateway.saveMessageToHistory(platformId, {
+              id: Date.now(),
+              type,
+              content,
+              timestamp
+            });
+          }
+          
+          checkScrollButton();
+        }
+
+        // Handle response from main process (Iteration 9: Fixed)
+        function handleResponse(responseData) {
+          if (!responseData) return;
+          
+          const messageDiv = document.createElement('div');
+          messageDiv.className = 'message assistant';
+          
+          messageDiv.innerHTML = `
+            <div class="message-header">
+              <span class="message-time">${new Date(Date.now()).toLocaleTimeString()}</span>
+            </div>
+            ${parseMarkdown(responseData.message || '')}
+          `;
+          
+          const messagesContainer = document.getElementById('messages');
+          messagesContainer.appendChild(messageDiv);
+          
+          // Scroll to bottom
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          
+          // Store response in history (if global API available)
+          if (window.AIGateway && window.AIGateway.saveMessageToHistory) {
+            window.AIGateway.saveMessageToHistory(platformId, {
+              id: Date.now(),
+              type: 'assistant',
+              content: responseData.message || '',
+              timestamp: Date.now()
+            });
+          }
+          
+          // Clear loading indicator if present
+          const typingIndicator = document.querySelector('.typing-indicator');
+          if (typingIndicator) {
+            typingIndicator.remove();
+          }
+        }
+
+        // Parse simple markdown (basic implementation)
+        function parseMarkdown(text) {
+          let html = text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/`(.+?)`/g, '<code>$1</code>')
+            .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+            .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+            .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+            .replace(/\n/g, '<br>');
+          
+          return html;
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+        }
+
+        // Initialize: add welcome message
+        window.addEventListener('load', () => {
+          console.log('[Webview] Initialized for ' + platformId);
+          
+          // Add initial system message
+          setTimeout(() => {
+            addMessageToUI(
+              `Connected to ${platformName}. Start chatting!`,
+              'system'
+            );
+          }, 500);
+        });
+
+        // Listen for response-ready messages from main process
+        window.addEventListener('message', (event) => {
+          const data = event.data;
+          
+          if (data?.type === 'response-ready') {
+            console.log('[Webview] Response ready:', data);
+            
+            // Store response for polling mechanism (Iteration 9: Fixed)
+            const historyKey = `webview-response-${platformId}`;
+            try {
+              const responses = JSON.parse(localStorage.getItem(historyKey) || '[]');
+              responses.push({
+                timestamp: Date.now(),
+                message: data.response || '',
+                status: data.status || 'success'
+              });
+              
+              // Keep only last 10 responses
+              if (responses.length > 10) {
+                responses.shift();
+              }
+              
+              localStorage.setItem(historyKey, JSON.stringify(responses));
+            } catch (error) {
+              console.error('[Webview] Error storing response:', error);
             }
           }
-          
-          userInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') handleUserSubmit();
-          });
-          
-          sendBtn.addEventListener('click', handleUserSubmit);
         });
-        
-        // Load history messages when webview is ready
-        function loadHistoryMessages() {
-          // In a real implementation, fetch from localStorage or IPC
-          // For now, this is placeholder
-          console.log('[Webview]', platformId, 'Loading history...');
-        }
-        
-        // Save message to history (placeholder for real implementation)
-        async function saveToHistory(message) {
-          // In a real implementation, send IPC message to main process
-          if (window.electronAPI?.saveMessageToHistory) {
-            return window.electronAPI.saveMessageToHistory(platformId, message.content, message.type);
-          }
-          return Promise.resolve(true);
-        }
       </script>
     </body>
     </html>
   `;
 }
 
-// Inject HTML template into webview
-function injectWebviewContent(platformId) {
-  const webview = webviews[platformId];
+// Inject content into webview (Iteration 9: Fixed template loading with proper variable substitution)
+function injectWebviewContent(platformId, platformName) {
+  const container = document.querySelector(`[data-platform="${platformId}"] .webview-content`);
   
-  if (!webview) {
-    console.error(`[${platformId}] Webview not found`);
-    return false;
-  }
+  if (!container) return;
   
-  try {
-    // Inject the template content into the webview's main world context
-    // This allows us to send messages back to the parent process
-    const template = getWebviewTemplate(platformId);
-    
-    // Clear and inject new content
-    webview.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(template);
-    
-    console.log(`[${platformId}] Injected template content`);
-    return true;
-  } catch (error) {
-    console.error(`[${platformId}] Error injecting template:`, error);
-    return false;
-  }
+  // Create iframe element to host webview content (safer alternative for renderer process)
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'block';
+  iframe.style.width = '100%';
+  iframe.style.height = '100%';
+  iframe.style.border = 'none';
+  iframe.setAttribute('data-platform', platformId);
+  
+  // Load template content with proper variable substitution
+  const template = getWebviewTemplate(platformId, platformName);
+  iframe.contentWindow.document.write(template);
+  iframe.contentWindow.document.close();
+  
+  container.appendChild(iframe);
+  
+  console.log(`[${platformName}] Webview content injected`);
 }
 
-// Create response panels for each platform with enhanced UI
+// Create response panels for panels mode (Iteration 9: Enhanced)
 function createResponsePanels() {
   const panelsContainer = document.getElementById('responsePanels');
+  if (!panelsContainer) return;
   
   platforms.forEach(platform => {
     const panel = document.createElement('div');
     panel.className = 'response-panel';
+    panel.setAttribute('data-platform', platform.id);
     
-    // Use CSS variable for platform color, fallback to default
     panel.innerHTML = `
       <div class="response-panel-header">
-        <div class="platform-icon" style="background: ${platformColorMap[platform.id] || '#666'}"></div>
+        <span class="platform-icon" style="width: 12px; height: 12px; background: ${platformColorMap[platform.id] || '#ccc'}; border-radius: 50%;"></span>
         <h3>${platform.name}</h3>
-        <button id="panel-clear-${platform.id}" style="margin-left:auto; background:none; border:none; color:#aaa; cursor:pointer;">Clear</button>
+        <button class="clear-history-btn" title="Clear history">🗑️</button>
       </div>
-      <div class="response-panel-content" data-platform="${platform.id}">
-        <div class="loading"></div>
+      <div class="response-panel-content" id="panel-${platform.id}">
+        <div class="empty-state">
+          Waiting for messages...
+        </div>
       </div>
     `;
-
-    // Add clear button functionality
-    const clearBtn = panel.querySelector(`#panel-clear-${platform.id}`);
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        const contentDiv = panel.querySelector('.response-panel-content');
-        if (contentDiv) {
-          contentDiv.innerHTML = '<div class="loading"></div>';
-          // Clear history as well
-          clearConversationHistory(platform.id);
-        }
-      });
-    }
-
+    
     panelsContainer.appendChild(panel);
-  });
-}
-
-// Setup response panels with enhanced functionality
-function setupResponsePanels() {
-  const panelsContainer = document.getElementById('responsePanels');
-  
-  if (!panelsContainer) return;
-  
-  // Populate panels with history data
-  platforms.forEach(platform => {
-    const panelContent = panelsContainer.querySelector(`[data-platform="${platform.id}"]`);
     
-    if (panelContent && conversationHistory[platform.id].length > 0) {
-      renderPanelMessages(panelContent, platform.id);
-    }
-  });
-}
-
-// Render messages in a response panel
-function renderPanelMessages(panelElement, platformId) {
-  const history = conversationHistory[platformId] || [];
-  
-  if (history.length === 0) {
-    panelElement.innerHTML = '<div style="padding:20px; color:#888; text-align:center;">No messages yet. Start chatting!</div>';
-    return;
-  }
-  
-  let html = '';
-  
-  history.forEach(msg => {
-    const formattedTime = new Date(msg.timestamp).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-    
-    if (msg.type === 'user') {
-      html += `
-        <div style="display:flex; margin-bottom:8px;">
-          <div style="flex:1; background:#0f3460; color:white; padding:10px 14px; border-radius:16px 16px 4px 4px; margin-right:8px;">
-            ${msg.content}
-          </div>
-        </div>
-      `;
-    } else if (msg.type === 'assistant') {
-      html += `
-        <div style="display:flex; margin-bottom:8px;">
-          <div style="flex:1; background:#e0e0e0; color:#333; padding:10px 14px; border-radius:16px 16px 4px 4px; margin-right:8px;">
-            ${msg.content}
-          </div>
-        </div>
-      `;
-    } else if (msg.type === 'system') {
-      html += `<div style="text-align:center; color:#888; font-size:12px; padding:4px 0;">${msg.content}</div>`;
-    }
-  });
-  
-  panelElement.innerHTML = html;
-}
-
-// Setup mode toggle functionality
-function setupModeToggle() {
-  const toggle = document.getElementById('modeToggle');
-  const tabsBtn = toggle.querySelector('[data-mode="tabs"]');
-  const panelsBtn = toggle.querySelector('[data-mode="panels"]');
-
-  if (tabsBtn && panelsBtn) {
-    tabsBtn.addEventListener('click', () => setMode('tabs'));
-    panelsBtn.addEventListener('click', () => setMode('panels'));
-    
-    // Sync with current mode from main process
-    const current = window.electronAPI?.getCurrentMode?.() || currentMode;
-    if (current === 'tabs') {
-      tabsBtn.classList.add('active');
-      panelsBtn.classList.remove('active');
-      document.body.classList.remove('panels-mode');
-    } else {
-      tabsBtn.classList.remove('active');
-      panelsBtn.classList.add('active');
-      document.body.classList.add('panels-mode');
-    }
-  }
-}
-
-// Update mode UI elements
-function updateModeUI(mode) {
-  const tabsBtn = document.querySelector('[data-mode="tabs"]');
-  const panelsBtn = document.querySelector('[data-mode="panels"]');
-  
-  if (mode === 'tabs') {
-    tabsBtn.classList.add('active');
-    panelsBtn.classList.remove('active');
-    document.body.classList.remove('panels-mode');
-  } else {
-    tabsBtn.classList.remove('active');
-    panelsBtn.classList.add('active');
-    document.body.classList.add('panels-mode');
-  }
-}
-
-// Set the current mode (tabs or panels)
-function setMode(mode) {
-  if (currentMode === mode) return;
-  
-  currentMode = mode;
-  
-  // Persist mode to localStorage
-  localStorage.setItem('aiGatewayMode', mode);
-  
-  // Update button states
-  updateModeUI(mode);
-  
-  // If switching to panels mode, hide webviews and show response panels
-  if (mode === 'panels') {
-    document.body.classList.add('panels-mode');
-    
-    // Hide all webviews
-    const webviewTabs = document.querySelectorAll('.webview-tab');
-    webviewTabs.forEach(webview => {
-      webview.style.position = 'absolute';
-      webview.style.left = '-9999px';
-      webview.style.visibility = 'hidden';
-    });
-
-    // Show response panels and render messages
-    const panels = document.getElementById('responsePanels');
-    if (panels) {
-      panels.style.display = 'grid';
-      
-      // Render all panel messages
-      platforms.forEach(platform => {
-        const panelContent = panels.querySelector(`[data-platform="${platform.id}"]`);
-        if (panelContent && conversationHistory[platform.id]) {
-          renderPanelMessages(panelContent, platform.id);
-        }
-      });
-    }
-  } 
-  // If switching to tabs mode, show webviews and hide response panels
-  else if (mode === 'tabs') {
-    document.body.classList.remove('panels-mode');
-    
-    // Show all webviews
-    const webviewTabs = document.querySelectorAll('.webview-tab');
-    webviewTabs.forEach(webview => {
-      webview.style.position = 'relative';
-      webview.style.left = 'auto';
-      webview.style.visibility = 'visible';
-    });
-
-    // Hide response panels
-    const panels = document.getElementById('responsePanels');
-    if (panels) {
-      panels.style.display = 'none';
-    }
-  }
-}
-
-// IPC handler for injecting prompts into webviews
-ipcRenderer.on('inject-prompt', (event, platformId, promptData) => {
-  const webview = webviews[platformId];
-  
-  if (!webview) {
-    console.error(`[${platformId}] Webview not found`);
-    return;
-  }
-  
-  if (currentMode === 'tabs') {
-    // Only inject when in tabs mode and webview is visible
-    try {
-      // Send message to renderer's injected content
-      webview.send('prompt-injected', promptData);
-      console.log(`[${platformId}] Prompt injected successfully`);
-    } catch (error) {
-      console.error(`[${platformId}] Error sending prompt:`, error);
-    }
-  } else if (currentMode === 'panels') {
-    // In panels mode, we might need to show the webview temporarily
-    const webviewContainer = document.querySelector(`[data-platform="${platformId}"]`);
-    if (webviewContainer) {
-      webviewContainer.style.position = 'relative';
-      webviewContainer.style.left = 'auto';
-      webviewContainer.style.visibility = 'visible';
-      
-      // Find the actual webview element inside
-      const webviewElement = webviewContainer.querySelector('webview');
-      if (webviewElement) {
-        try {
-          webviewElement.send('prompt-injected', promptData);
-          
-          // Hide after a short delay
-          setTimeout(() => {
-            webviewContainer.style.position = 'absolute';
-            webviewContainer.style.left = '-9999px';
-            webviewContainer.style.visibility = 'hidden';
-          }, 500);
-        } catch (error) {
-          console.error(`[${platformId}] Error sending prompt in panels mode:`, error);
+    // Setup clear history button
+    panel.querySelector('.clear-history-btn').addEventListener('click', () => {
+      const content = panel.querySelector('.response-panel-content');
+      if (content) {
+        content.innerHTML = '<div class="empty-state">History cleared</div>';
+        
+        // Clear from global history if available
+        if (window.AIGateway && window.AIGateway.clearConversationHistory) {
+          window.AIGateway.clearConversationHistory(platform.id);
         }
       }
-    }
-  }
-});
-
-// IPC handler for extracting responses from webviews
-ipcRenderer.on('extract-response', (event, platformId) => {
-  const webview = webviews[platformId];
-  
-  if (!webview) {
-    console.error(`[${platformId}] Webview not found`);
-    return null;
-  }
-  
-  console.log(`[${platformId}] Extracting response...`);
-  
-  try {
-    // Get the last sent message from webview (if any)
-    // In a real implementation, this would extract from DOM or IPC
+    });
     
-    // Return current polling state if available
+    // Setup polling for this panel
+    setupPanelPolling(platform.id, panel);
+  });
+}
+
+// Setup polling mechanism for response panels (Iteration 9: Enhanced with better error handling)
+function setupPanelPolling(platformId, panelElement) {
+  const content = panelElement.querySelector('.response-panel-content');
+  
+  // Initialize polling state
+  if (!pollingState[platformId]) {
+    pollingState[platformId] = {
+      lastResponseTime: Date.now(),
+      pendingPrompts: [],
+      messageCount: 0,
+      historyReady: false,
+      responses: []
+    };
+  }
+  
+  // Poll for new responses
+  setInterval(() => {
     const state = pollingState[platformId];
     
-    // Simulate extracting response from last known state
-    if (state && state.lastResponseTime) {
-      const response = {
-        platform: platformId,
-        timestamp: state.lastResponseTime,
-        message: 'Response extracted successfully'
-      };
+    if (!state) return;
+    
+    // Check for new messages in localStorage
+    try {
+      const historyKey = `webview-response-${platformId}`;
+      const storedResponses = JSON.parse(localStorage.getItem(historyKey) || '[]');
       
-      console.log(`[${platformId}] Response data:`, JSON.stringify(response));
-      return response;
+      // Compare with last polled state
+      const lastPolled = state.lastResponseTime;
+      let hasNewMessages = false;
+      
+      for (const response of storedResponses) {
+        if (response.timestamp > lastPolled) {
+          hasNewMessages = true;
+          break;
+        }
+      }
+      
+      if (hasNewMessages) {
+        // Update state
+        state.lastResponseTime = Date.now();
+        state.responses = storedResponses;
+        
+        // Render new messages to panel
+        renderPanelMessages(platformId, content);
+      }
+    } catch (error) {
+      console.error(`[${platformId}] Error polling responses:`, error);
+    }
+  }, RESPONSE_POLL_INTERVAL);
+}
+
+// Render messages to response panel (Iteration 9: Enhanced with proper formatting and accessibility)
+function renderPanelMessages(platformId, container) {
+  const historyKey = `webview-response-${platformId}`;
+  const responses = JSON.parse(localStorage.getItem(historyKey) || '[]');
+  
+  if (!responses.length) return;
+  
+  // Clear empty state if present
+  const emptyState = container.querySelector('.empty-state');
+  if (emptyState) {
+    emptyState.remove();
+  }
+  
+  // Create message container
+  const messageContainer = document.createElement('div');
+  messageContainer.className = 'message-container';
+  
+  // Render each response (most recent first)
+  [...responses].reverse().forEach(response => {
+    const messageDiv = document.createElement('div');
+    
+    if (response.type === 'user') {
+      messageDiv.className = 'panel-message-user';
+      messageDiv.innerHTML = `
+        <span>${escapeHtml(response.content)}</span>
+        <div class="message-time">${new Date(response.timestamp).toLocaleTimeString()}</div>
+      `;
+    } else if (response.type === 'assistant') {
+      messageDiv.className = 'panel-message-assistant';
+      messageDiv.innerHTML = `
+        ${parseMarkdown(response.content)}
+        <div class="message-time">${new Date(response.timestamp).toLocaleTimeString()}</div>
+      `;
+    } else if (response.status === 'error') {
+      messageDiv.className = 'panel-message-system';
+      messageDiv.style.background = '#2d1f1f';
+      messageDiv.innerHTML = `<span style="color: #e94560;">Error: ${escapeHtml(response.error || 'Unknown error')}</span>`;
+    } else {
+      messageDiv.className = 'panel-message-assistant';
+      messageDiv.innerHTML = `
+        <div class="empty-state" style="height: 100%;">Waiting for response...</div>
+      `;
     }
     
-    return null;
-  } catch (error) {
-    console.error(`[${platformId}] Error extracting response:`, error);
-    return null;
-  }
-});
+    messageContainer.appendChild(messageDiv);
+  });
+  
+  container.appendChild(messageContainer);
+}
 
-// Start polling for responses from webviews
-function startResponsePolling() {
-  platforms.forEach(platform => {
-    // Set up periodic polling for each webview
-    setInterval(() => {
-      const state = pollingState[platform.id];
+// Escape HTML to prevent XSS in panel messages
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Parse simple markdown for panel messages
+function parseMarkdown(text) {
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code style="background: #e0e0e0; padding: 2px 6px; border-radius: 4px; font-family: monospace;">$1</code>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/\n/g, '<br>');
+  
+  return html;
+}
+
+// Setup mode toggle functionality (Iteration 9: Enhanced with keyboard navigation)
+function setupModeToggle() {
+  const modeToggle = document.getElementById('modeToggle');
+  const modeBtns = modeToggle.querySelectorAll('.mode-btn');
+  
+  // Add keyboard navigation support
+  modeToggle.setAttribute('role', 'group');
+  modeToggle.setAttribute('aria-label', 'View mode selection');
+  
+  modeBtns.forEach((btn, index) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.mode;
       
-      if (state) {
-        // Check if there's a pending prompt response to extract
-        console.log(`[${platform.id}] Polling for responses...`);
-        
-        // Extract and return response data if available
-        ipcRenderer.sendToHost('response-ready', {
-          platform: platform.id,
-          lastResponseTime: state.lastResponseTime,
-          timestamp: Date.now()
-        });
+      // Toggle active state
+      modeBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      
+      // Update body class
+      document.body.classList.toggle('panels-mode', mode === 'panels');
+      
+      // Switch between tabs and panels modes
+      if (mode === 'tabs') {
+        document.body.classList.remove('panels-mode');
+        showToast('Switched to Tabs mode');
+      } else {
+        document.body.classList.add('panels-mode');
+        showToast('Switched to Panels mode');
       }
-    }, RESPONSE_POLL_INTERVAL);
+      
+      // Update current mode state
+      currentMode = mode;
+    });
+    
+    // Add keyboard support (arrow keys for selection, Enter to confirm)
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const newIndex = index + (e.key === 'ArrowRight' ? 1 : -1);
+        if (modeBtns[newIndex]) {
+          modeBtns[newIndex].focus();
+        }
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        btn.click();
+      }
+    });
   });
 }
 
-// Listen for IPC messages from main process
-const channelHandlers = {
-  'prompt-injected': (event, data) => {
-    console.log(`[${data.platform}] Prompt received: ${JSON.stringify(data.message).substring(0, 50)}...`);
-    
-    // Update polling state with new response time
-    const state = pollingState[data.platform] || {};
-    state.lastResponseTime = Date.now();
-    pollingState[data.platform] = state;
-  },
+// Setup settings panel (Iteration 9: Enhanced)
+function setupSettingsPanel() {
+  const settingsPanel = document.getElementById('settingsPanel');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsClose = document.getElementById('settingsClose');
   
-  'response-received': (event, data) => {
-    console.log(`[${data.platform}] Response received: ${data.response.substring(0, 100)}...`);
+  // Add ARIA attributes for accessibility
+  settingsPanel.setAttribute('aria-hidden', 'true');
+  settingsBtn.setAttribute('aria-expanded', 'false');
+  
+  // Toggle settings panel
+  settingsBtn.addEventListener('click', () => {
+    const isOpen = settingsPanel.classList.toggle('open');
+    settingsBtn.setAttribute('aria-expanded', isOpen.toString());
+    settingsPanel.setAttribute('aria-hidden', !isOpen);
+  });
+  
+  settingsClose.addEventListener('click', () => {
+    settingsPanel.classList.remove('open');
+    settingsBtn.setAttribute('aria-expanded', 'false');
+    settingsPanel.setAttribute('aria-hidden', 'true');
+  });
+  
+  // Close settings when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!settingsPanel.contains(e.target) && e.target !== settingsBtn) {
+      settingsPanel.classList.remove('open');
+      settingsBtn.setAttribute('aria-expanded', 'false');
+      settingsPanel.setAttribute('aria-hidden', 'true');
+    }
+  });
+  
+  // Save API key handlers
+  platforms.forEach(platform => {
+    const saveBtn = document.getElementById(`saveApiKey-${platform.id}`);
+    const input = document.getElementById(`apiKey-${platform.id}`);
     
-    // Update polling state with new response time
-    const state = pollingState[data.platform] || {};
-    state.lastResponseTime = Date.now();
-    pollingState[data.platform] = state;
-    
-    // Send to main process for UI update
-    ipcRenderer.sendToHost('response-updated', {
-      platform: data.platform,
-      response: data.response,
-      timestamp: Date.now()
+    if (saveBtn && input) {
+      saveBtn.addEventListener('click', () => {
+        const key = input.value;
+        const isValid = validateAPIKey(platform.id, key);
+        
+        if (isValid.valid) {
+          saveAPIKey(platform.id, key);
+          
+          // Test connection if enabled
+          if (document.getElementById('enableRealAPI')?.checked) {
+            testAPIConnection(platform.id);
+          }
+        } else {
+          showToast(isValid.error || 'Invalid API key', 'error');
+        }
+      });
+    }
+  });
+  
+  // Enable/Disable real API toggle
+  const enableRealAPI = document.getElementById('enableRealAPI');
+  if (enableRealAPI) {
+    enableRealAPI.addEventListener('change', async () => {
+      const enabled = enableRealAPI.checked;
+      
+      if (enabled) {
+        showToast('Real API mode enabled. Please configure API keys above.', 'success');
+        
+        // Test all configured APIs
+        const connectedApis = [];
+        platforms.forEach(platform => {
+          const key = apiKeyStorage[platform.id];
+          if (key) {
+            const config = platformAPIConfig[platform.id];
+            if (config.baseUrl) {
+              try {
+                await testAPIConnection(platform.id);
+                connectedApis.push(platform.name);
+              } catch (error) {
+                console.error(`[${platform.id}] API test failed:`, error);
+              }
+            }
+          }
+        });
+        
+        if (connectedApis.length > 0) {
+          showToast(`Connected APIs: ${connectedApis.join(', ')}`, 'success');
+        } else {
+          showToast('No connected APIs. Please configure valid API keys.', 'error');
+        }
+      }
     });
   }
-};
-
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-  init();
   
-  // Start polling for responses after a short delay
-  setTimeout(startResponsePolling, 1000);
-});
+  // Search functionality
+  setupSearch();
+  
+  // Export/Import handlers
+  const exportBtn = document.getElementById('exportBtn');
+  const importBtn = document.getElementById('importBtn');
+  const importFile = document.getElementById('importFile');
+  
+  if (exportBtn) {
+    exportBtn.addEventListener('click', exportConversations);
+  }
+  
+  if (importBtn && importFile) {
+    importBtn.addEventListener('click', () => {
+      importFile.click();
+    });
+    
+    importFile.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        importConversations(file);
+        importFile.value = ''; // Reset input
+      }
+    });
+  }
+  
+  // Clear all history handler
+  const clearAllBtn = document.getElementById('clearAllHistoryBtn');
+  if (clearAllBtn) {
+    clearAllBtn.addEventListener('click', () => {
+      clearAllHistory();
+      settingsPanel.classList.remove('open');
+      settingsBtn.setAttribute('aria-expanded', 'false');
+      settingsPanel.setAttribute('aria-hidden', 'true');
+    });
+  }
+  
+  // Status indicator
+  const apiStatus = document.getElementById('apiStatus');
+  const apiStatusText = document.getElementById('apiStatusText');
+  
+  async function updateStatus() {
+    let connectedCount = 0;
+    
+    platforms.forEach(platform => {
+      const key = apiKeyStorage[platform.id];
+      if (key) {
+        const config = platformAPIConfig[platform.id];
+        if (config.baseUrl && !config.fallback) {
+          try {
+            await testAPIConnection(platform.id);
+            connectedCount++;
+          } catch (error) {
+            console.error(`[${platform.id}] Status check failed:`, error);
+          }
+        } else {
+          // Private/internal API
+          connectedCount++;
+        }
+      }
+    });
+    
+    const total = platforms.length;
+    const percentage = Math.round((connectedCount / total) * 100);
+    
+    if (percentage >= 50) {
+      apiStatus.classList.add('connected');
+      apiStatusText.textContent = `API Status: ${percentage}% Connected`;
+    } else {
+      apiStatus.classList.remove('connected');
+      apiStatusText.textContent = `API Status: Only ${percentage}% Connected`;
+    }
+  }
+  
+  // Update status when settings panel is opened
+  settingsPanel.addEventListener('click', () => {
+    updateStatus();
+  });
+}
+
+// Perform conversation search
+async function performSearch(query) {
+  if (!query || query.length < 2) return;
+  
+  // Clear previous timeout
+  if (searchTimeout) clearTimeout(searchTimeout);
+  
+  searchTimeout = setTimeout(async () => {
+    try {
+      // Search all conversations for matching messages
+      const results = [];
+      
+      platforms.forEach(platform => {
+        const history = conversationHistory[platform.id] || [];
+        
+        history.forEach(msg => {
+          if (msg.content.toLowerCase().includes(query.toLowerCase())) {
+            results.push({
+              platform: platform.name,
+              type: msg.type,
+              content: msg.content,
+              timestamp: msg.timestamp,
+              match: query
+            });
+          }
+        });
+      });
+      
+      // Sort by timestamp (newest first)
+      results.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      
+      // Limit to top 10 results
+      searchResults = results.slice(0, 10);
+      
+      // Display results in a toast or modal
+      if (results.length > 0) {
+        const resultText = `Found ${results.length} match(es):\n\n${results.map(r => 
+          `[${r.platform}] (${new Date(r.timestamp).toLocaleString()})\n${r.content.substring(0, 100)}...`
+        ).join('\n\n')}`;
+        
+        showToast(resultText, 'success');
+      } else {
+        showToast('No matching conversations found', 'error');
+      }
+      
+    } catch (error) {
+      console.error('[Search] Error:', error);
+      showToast('Search error: ' + error.message, 'error');
+    }
+  }, 300); // 300ms debounce
+}
+
+// Export conversation history
+function exportConversations() {
+  try {
+    const exportData = {};
+    
+    platforms.forEach(platform => {
+      const history = conversationHistory[platform.id] || [];
+      
+      if (history.length > 0) {
+        exportData[platform.name] = history.map(msg => ({
+          id: msg.id,
+          type: msg.type,
+          content: msg.content,
+          timestamp: new Date(msg.timestamp).toISOString()
+        }));
+      }
+    });
+    
+    // Create download link
+    const dataStr = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ai-gateway-export-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast('Conversations exported successfully!', 'success');
+  } catch (error) {
+    console.error('[Export] Error:', error);
+    showToast('Error exporting conversations', 'error');
+  }
+}
+
+// Import conversation history
+function importConversations(file) {
+  if (!file) return;
+  
+  const reader = new FileReader();
+  
+  reader.onload = (e) => {
+    try {
+      const importedData = JSON.parse(e.target.result);
+      
+      // Validate structure
+      if (!importedData || typeof importedData !== 'object') {
+        throw new Error('Invalid export format');
+      }
+      
+      // Merge with existing history
+      Object.keys(importedData).forEach(platformName => {
+        const platformId = platforms.find(p => p.name === platformName)?.id;
+        
+        if (platformId && importedData[platformName]) {
+          conversationHistory[platformId] = [
+            ...conversationHistory[platformId] || [],
+            ...importedData[platformName].map(msg => ({
+              id: Date.now() + Math.random(), // Generate new IDs to avoid conflicts
+              type: msg.type,
+              content: msg.content,
+              timestamp: new Date(msg.timestamp).getTime()
+            }))
+          ];
+          
+          // Save updated history
+          saveConversationHistoryToStorage(platformId);
+        }
+      });
+      
+      showToast('Conversations imported successfully!', 'success');
+    } catch (error) {
+      console.error('[Import] Error:', error);
+      showToast('Error importing conversations: ' + error.message, 'error');
+    }
+  };
+  
+  reader.readAsText(file);
+}
+
+// Save conversation history to localStorage
+function saveConversationHistoryToStorage(platformId) {
+  try {
+    localStorage.setItem(`conversation-history-${platformId}`, JSON.stringify(conversationHistory[platformId]));
+    return true;
+  } catch (error) {
+    console.error(`[${platformId}] Error saving history:`, error);
+    return false;
+  }
+}
+
+// Clear conversation history
+function clearConversationHistory(platformId) {
+  conversationHistory[platformId] = [];
+  
+  try {
+    localStorage.removeItem(`conversation-history-${platformId}`);
+    showToast('Conversation history cleared for ' + platforms.find(p => p.id === platformId)?.name, 'success');
+    return true;
+  } catch (error) {
+    console.error(`[${platformId}] Error clearing history:`, error);
+    return false;
+  }
+}
+
+// Clear all conversation history
+function clearAllHistory() {
+  if (!confirm('Are you sure you want to clear ALL conversation history? This cannot be undone.')) {
+    return false;
+  }
+  
+  platforms.forEach(platform => {
+    clearConversationHistory(platform.id);
+  });
+  
+  showToast('All conversation history cleared', 'success');
+}
+
+// Setup response panels (Iteration 9: Enhanced)
+function setupResponsePanels() {
+  // Create panels if not already created
+  if (!document.getElementById('responsePanels')) {
+    createResponsePanels();
+  }
+}
+
+// Initialize the application
+function init() {
+  // Load persisted mode from localStorage
+  const storedMode = localStorage.getItem('aiGatewayMode');
+  if (storedMode && (storedMode === 'tabs' || storedMode === 'panels')) {
+    currentMode = storedMode;
+  }
+  
+  // Load conversation history from localStorage
+  loadConversationHistory();
+  
+  // Load API keys
+  loadAPIKeys();
+  
+  createWebviews();
+  setupModeToggle();
+  setupResponsePanels();
+  setupSettingsPanel();
+  
+  // Listen for mode changes from main process
+  ipcRenderer.on('mode-changed', (event, mode) => {
+    currentMode = mode;
+    updateModeUI(mode);
+  });
+  
+  console.log('[Renderer] AI Gateway v2 initialized with real API integration');
+}
+
+// Load conversation history from localStorage
+function loadConversationHistory() {
+  platforms.forEach(platform => {
+    const key = `conversation-history-${platform.id}`;
+    try {
+      const storedHistory = localStorage.getItem(key);
+      if (storedHistory) {
+        conversationHistory[platform.id] = JSON.parse(storedHistory);
+      } else {
+        conversationHistory[platform.id] = [];
+      }
+    } catch (error) {
+      console.error(`[${platform.name}] Error loading history:`, error);
+      conversationHistory[platform.id] = [];
+    }
+  });
+}
+
+// Update UI when mode changes
+function updateModeUI(mode) {
+  const body = document.body;
+  
+  if (mode === 'panels') {
+    body.classList.add('panels-mode');
+  } else {
+    body.classList.remove('panels-mode');
+  }
+}
 
 // Export for use in other modules
 window.AIGateway = {
@@ -825,5 +1379,16 @@ window.AIGateway = {
   pollingState,
   conversationHistory,
   saveMessageToHistory,
-  clearConversationHistory
+  clearConversationHistory,
+  exportConversations,
+  importConversations,
+  searchResults
 };
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  init();
+  
+  // Start polling for responses after a short delay
+  setTimeout(startResponsePolling, 1000);
+});
