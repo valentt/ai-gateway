@@ -171,7 +171,7 @@ ipcMain.handle('clear-api-key', async (event, platform) => {
 /**
  * IPC Handler: Send question to a model via API
  */
-ipcMain.handle('send-to-model', async (event, { platform, question }) => {
+ipcMain.handle('send-to-model', async (event, { platform, question, generation }) => {
   try {
     // Check if platform has API support
     const platformConfig = apiService.PLATFORM_API_CONFIG[platform];
@@ -185,7 +185,8 @@ ipcMain.handle('send-to-model', async (event, { platform, question }) => {
           tokens: '0',
           durationMs: 0,
           done: true,
-          source: 'api'
+          source: 'api',
+          generation
         });
       }
       return err;
@@ -204,7 +205,8 @@ ipcMain.handle('send-to-model', async (event, { platform, question }) => {
           tokens: '0',
           durationMs: 0,
           done: true,
-          source: 'api'
+          source: 'api',
+          generation
         });
       }
       return err;
@@ -223,7 +225,8 @@ ipcMain.handle('send-to-model', async (event, { platform, question }) => {
         tokens: result.tokens || '?',
         durationMs: latency,
         done: true,
-        source: 'api'
+        source: 'api',
+        generation
       });
     }
 
@@ -238,7 +241,8 @@ ipcMain.handle('send-to-model', async (event, { platform, question }) => {
         tokens: '0',
         durationMs: 0,
         done: true,
-        source: 'api'
+        source: 'api',
+        generation
       });
     }
     return { success: false, error: err.message };

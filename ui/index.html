@@ -203,17 +203,7 @@
       <input type="text" placeholder="Search conversations..." id="searchInput">
     </div>
     <div class="history-list" id="historyList">
-      <div class="history-category">
-        <h3>Today</h3>
-        <div class="history-item active" onclick="loadConversation('demo')">
-          Compare code generation approaches
-          <div class="models-used">
-            <div class="dot" style="background:var(--claude)"></div>
-            <div class="dot" style="background:var(--gpt)"></div>
-            <div class="dot" style="background:var(--gemini)"></div>
-          </div>
-        </div>
-      </div>
+      <!-- Rendered dynamically from localStorage -->
     </div>
     <button class="new-chat-btn" onclick="newChat()">+ New Conversation</button>
   </div>
@@ -391,20 +381,51 @@
   }
 
   function setMode(mode, btn) {
+    try {
     currentMode = mode;
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+
+    // Clear any running extraction timers from webview mode
+    Object.keys(extractionTimers).forEach(function(k) {
+      clearInterval(extractionTimers[k]);
+    });
+    extractionTimers = {};
+
+    // Bump generation so stale responses from previous mode are discarded
+    currentGeneration++;
+
     document.body.classList.remove('webview-mode', 'api-mode');
     document.body.classList.add(mode + '-mode');
     if (mode === 'webview') {
       createWebviewTabs();
+    } else {
+      // Ensure panels exist when switching to API mode
+      runIsolated(getSelectedModels());
+      // Tag panels with current generation to enable stale-response detection
+      document.querySelectorAll('.panel').forEach(function(p) {
+        p.dataset.generation = currentGeneration;
+      });
+      // Show ready state instead of loading spinners (no question in-flight)
+      document.querySelectorAll('.panel-body').forEach(function(body) {
+        body.innerHTML = '<p style="color:var(--text-dim);">Ready. Ask a question to get started.</p>';
+      });
+      // Clear stale extraction bar
+      document.getElementById('extractionBar').innerHTML = '';
+    }
+    } catch (err) {
+      console.error('[UI] setMode error:', err);
     }
   }
 
   function toggleChip(el) {
+    try {
     el.classList.toggle('selected');
     if (currentMode === 'webview') {
       createWebviewTabs();
+    }
+    } catch (err) {
+      console.error('[UI] toggleChip error:', err);
     }
   }
 
@@ -479,6 +500,7 @@
 
   // Send question handler
   function sendQuestion() {
+    try {
     const input = document.getElementById('questionInput');
     const q = input.value.trim();
     if (!q) return;
@@ -488,6 +510,11 @@
     const selected = getSelectedModels();
     if (selected.length === 0) { alert('Select at least one model'); return; }
 
+    // Each question starts a new conversation
+    currentConversationId = null;
+    currentGeneration++;
+    saveCurrentConversation(q, selected);
+
     if (currentMode === 'webview') {
       // Webview mode: inject prompt into webviews
       sendViaWebview(selected, q);
@@ -495,15 +522,24 @@
       // API mode: send via IPC
       sendViaApi(selected, q);
     }
+    } catch (err) {
+      console.error('[UI] sendQuestion error:', err);
+      alert('Error sending question: ' + err.message);
+    }
   }
 
   // API mode: send to each model via IPC (existing behavior)
   function sendViaApi(selected, q) {
+    var gen = currentGeneration;
     runIsolated(selected);
+    // Tag panels with generation so stale responses are discarded
+    document.querySelectorAll('.panel').forEach(function(p) {
+      p.dataset.generation = gen;
+    });
     selected.forEach(function(model) {
       var platform = MODEL_TO_PLATFORM[model] || model;
       if (window.aiGateway && window.aiGateway.sendToModel) {
-        window.aiGateway.sendToModel(platform, q).catch(function(err) {
+        window.aiGateway.sendToModel(platform, q, gen).catch(function(err) {
           console.error('[Renderer] Send failed for', platform, err);
           var body = document.querySelector('.panel-body[data-model="' + model + '"]');
           if (body) body.innerHTML = '<p style="color:#ef4444;">Error: ' + esc(err.message || String(err)) + '</p>';
@@ -514,6 +550,13 @@
 
   // Webview mode: inject prompt into webviews and poll for responses
   function sendViaWebview(selected, q) {
+    try {
+    // Clear any running extraction timers from previous question
+    Object.keys(extractionTimers).forEach(function(k) {
+      clearInterval(extractionTimers[k]);
+    });
+    extractionTimers = {};
+
     const bar = document.getElementById('extractionBar');
     bar.innerHTML = '';
 
@@ -565,10 +608,15 @@
 
       updateExtractionBar(model, 'pending', 'injecting...');
     });
+    } catch (err) {
+      console.error('[UI] sendViaWebview error:', err);
+    }
   }
 
   // Track extraction state
   var extractionTimers = {};
+  // Generation counter to prevent stale responses from overwriting new panels
+  var currentGeneration = 0;
 
   function updateExtractionBar(model, status, text) {
     var bar = document.getElementById('extractionBar');
@@ -651,6 +699,11 @@
                 body.innerHTML = formatResponse(content);
                 body.dataset.rawText = content;
               }
+              // Persist to history
+              if (currentConversationId) {
+                var conv = conversationHistory.find(function(c) { return c.id === currentConversationId; });
+                if (conv) { conv.responses = conv.responses || {}; conv.responses[panelModel] = content; saveHistory(); }
+              }
             }
           } else {
             if (tab) tab.textContent = 'streaming...';
@@ -679,6 +732,7 @@
   // Listen for unified responses from main process
   if (window.aiGateway && window.aiGateway.onUnifiedResponse) {
     window.aiGateway.onUnifiedResponse(function(data) {
+      try {
       const { platform, content, tokens, durationMs, done, source } = data;
       // Map platform ID back to model chip ID for panel lookup
       const model = PLATFORM_TO_MODEL[platform] || platform;
@@ -686,9 +740,22 @@
       console.log('[Renderer] Received response:', platform, '->', model, { tokens, durationMs, source });
 
       // Update isolated panel (used in both tabs and panels modes)
+      const panel = document.querySelector(`.panel[data-model="${model}"]`);
       const body = document.querySelector(`.panel-body[data-model="${model}"]`);
       const meta = document.querySelector(`.panel[data-model="${model}"] .panel-meta`);
       if (!body) return;
+
+      // Discard stale responses from previous questions
+      // Check 1: response carries its own generation from the request
+      if (data.generation !== undefined && data.generation !== currentGeneration) {
+        console.log('[Renderer] Ignoring stale response for', model, '(response gen', data.generation, 'vs current', currentGeneration, ')');
+        return;
+      }
+      // Check 2: panel generation mismatch (catches mode switches, newChat, loadConversation)
+      if (panel && panel.dataset.generation && Number(panel.dataset.generation) !== currentGeneration) {
+        console.log('[Renderer] Ignoring stale response for', model, '(panel gen mismatch)');
+        return;
+      }
 
       if (done) {
         const secs = ((durationMs || 0) / 1000).toFixed(1);
@@ -697,12 +764,30 @@
           body.innerHTML = '<p style="color:#ef4444;">' + esc(content) + '</p>';
           if (meta) { meta.textContent = 'error'; meta.style.color = '#ef4444'; }
         } else {
-          body.innerHTML = content ? formatResponse(content) : '<p style="color:var(--text-dim);">No response received.</p>';
+          try {
+            body.innerHTML = content ? formatResponse(content) : '<p style="color:var(--text-dim);">No response received.</p>';
+          } catch (fmtErr) {
+            console.error('[UI] formatResponse error:', fmtErr);
+            body.innerHTML = '<pre style="white-space:pre-wrap;">' + esc(content || '') + '</pre>';
+          }
         }
         if (content) body.dataset.rawText = content;
+
+        // Persist response to conversation history
+        if (content && currentConversationId) {
+          var conv = conversationHistory.find(function(c) { return c.id === currentConversationId; });
+          if (conv) { conv.responses = conv.responses || {}; conv.responses[model] = content; saveHistory(); }
+        }
       } else if (content) {
-        body.innerHTML = formatResponse(content);
+        try {
+          body.innerHTML = formatResponse(content);
+        } catch (fmtErr) {
+          body.innerHTML = '<pre style="white-space:pre-wrap;">' + esc(content) + '</pre>';
+        }
         if (meta) meta.textContent = 'generating...';
+      }
+      } catch (err) {
+        console.error('[UI] Response handler error:', err);
       }
     });
   }
@@ -740,6 +825,7 @@
 
   // Create webview tabs for selected models
   function createWebviewTabs() {
+    try {
     var selected = getSelectedModels();
     var tabBar = document.getElementById('webviewTabs');
     var container = document.getElementById('webviewContainer');
@@ -807,6 +893,9 @@
       var p = wv.dataset.platform;
       wv.classList.toggle('active', p === firstPlatform);
     });
+    } catch (err) {
+      console.error('[UI] createWebviewTabs error:', err);
+    }
   }
 
   // Switch between webview tabs
@@ -819,18 +908,159 @@
     });
   }
 
-  // Load conversation (stub for history items)
+  // --- Conversation history (localStorage) ---
+  var conversationHistory = [];
+  var currentConversationId = null;
+
+  function loadHistory() {
+    try {
+      var raw = localStorage.getItem('ai-gateway-history');
+      conversationHistory = raw ? JSON.parse(raw) : [];
+    } catch (e) { conversationHistory = []; }
+  }
+
+  function saveHistory() {
+    try {
+      // Keep last 50 conversations
+      if (conversationHistory.length > 50) conversationHistory = conversationHistory.slice(-50);
+      localStorage.setItem('ai-gateway-history', JSON.stringify(conversationHistory));
+    } catch (e) { console.error('[History] Save failed:', e); }
+  }
+
+  function saveCurrentConversation(question, models) {
+    var id = currentConversationId || ('conv-' + Date.now());
+    var existing = conversationHistory.find(function(c) { return c.id === id; });
+    if (existing) {
+      // Update responses
+      existing.responses = collectResponses();
+    } else {
+      conversationHistory.push({
+        id: id,
+        question: question,
+        models: models.slice(),
+        mode: currentMode,
+        timestamp: Date.now(),
+        responses: {}
+      });
+      currentConversationId = id;
+    }
+    saveHistory();
+    renderHistory();
+  }
+
+  function collectResponses() {
+    var responses = {};
+    document.querySelectorAll('.panel-body[data-model]').forEach(function(body) {
+      var model = body.dataset.model;
+      if (body.dataset.rawText) responses[model] = body.dataset.rawText;
+    });
+    return responses;
+  }
+
+  function renderHistory() {
+    var list = document.getElementById('historyList');
+    if (!conversationHistory.length) {
+      list.innerHTML = '<div class="history-category"><h3>No conversations yet</h3></div>';
+      return;
+    }
+
+    // Group by day
+    var today = new Date().toDateString();
+    var yesterday = new Date(Date.now() - 86400000).toDateString();
+    var groups = { Today: [], Yesterday: [], Older: [] };
+
+    conversationHistory.slice().reverse().forEach(function(c) {
+      var d = new Date(c.timestamp).toDateString();
+      if (d === today) groups.Today.push(c);
+      else if (d === yesterday) groups.Yesterday.push(c);
+      else groups.Older.push(c);
+    });
+
+    var html = '';
+    ['Today', 'Yesterday', 'Older'].forEach(function(label) {
+      if (!groups[label].length) return;
+      html += '<div class="history-category"><h3>' + label + '</h3>';
+      groups[label].forEach(function(c) {
+        var active = c.id === currentConversationId ? ' active' : '';
+        var truncated = c.question.length > 40 ? c.question.slice(0, 40) + '...' : c.question;
+        var dots = (c.models || []).map(function(m) {
+          return '<div class="dot" style="background:' + (MODEL_COLORS[m] || '#999') + '"></div>';
+        }).join('');
+        html += '<div class="history-item' + active + '" onclick="loadConversation(\'' + c.id + '\')">' +
+          esc(truncated) + '<div class="models-used">' + dots + '</div></div>';
+      });
+      html += '</div>';
+    });
+    list.innerHTML = html;
+  }
+
   function loadConversation(id) {
-    console.log('[UI] Load conversation:', id);
+    try {
+    var conv = conversationHistory.find(function(c) { return c.id === id; });
+    if (!conv) return;
+
+    currentConversationId = id;
+    // Bump generation so any in-flight responses are discarded
+    currentGeneration++;
+    renderHistory();
+
+    // Switch to API mode to show panels with saved responses
+    if (currentMode !== 'api') {
+      var apiBtn = null;
+      document.querySelectorAll('.mode-btn').forEach(function(b) {
+        if (b.textContent.trim() === 'API') apiBtn = b;
+      });
+      if (apiBtn) setMode('api', apiBtn);
+    }
+
+    // Restore model chip selection
+    document.querySelectorAll('.chip').forEach(function(c) {
+      c.classList.toggle('selected', (conv.models || []).indexOf(c.dataset.model) !== -1);
+    });
+
+    // Recreate panels with responses
+    runIsolated(conv.models || []);
+    // Tag panels so stale responses are discarded
+    document.querySelectorAll('.panel').forEach(function(p) {
+      p.dataset.generation = currentGeneration;
+    });
+    if (conv.responses) {
+      Object.keys(conv.responses).forEach(function(model) {
+        var body = document.querySelector('.panel-body[data-model="' + model + '"]');
+        var meta = document.querySelector('.panel[data-model="' + model + '"] .panel-meta');
+        if (body) {
+          try {
+            body.innerHTML = formatResponse(conv.responses[model]);
+          } catch (e) {
+            body.innerHTML = '<pre style="white-space:pre-wrap;">' + esc(conv.responses[model] || '') + '</pre>';
+          }
+          body.dataset.rawText = conv.responses[model];
+        }
+        if (meta) meta.textContent = 'from history';
+      });
+    }
+
+    // Show the question in input
+    document.getElementById('questionInput').value = conv.question;
+    } catch (err) {
+      console.error('[UI] loadConversation error:', err);
+    }
   }
 
   // New chat handler
   function newChat() {
+    try {
     // Clear extraction timers
     Object.keys(extractionTimers).forEach(function(k) {
       clearInterval(extractionTimers[k]);
     });
     extractionTimers = {};
+
+    // Reset conversation state and bump generation so stale responses are discarded
+    currentConversationId = null;
+    currentGeneration++;
+    document.getElementById('questionInput').value = '';
+    renderHistory();
 
     if (currentMode === 'webview') {
       // Remove all webviews and recreate fresh ones
@@ -841,6 +1071,17 @@
     } else {
       document.querySelectorAll('.panel, .chat-msg').forEach(function(el) { el.remove(); });
       runIsolated(getSelectedModels());
+      // Tag panels so stale responses are discarded
+      document.querySelectorAll('.panel').forEach(function(p) {
+        p.dataset.generation = currentGeneration;
+      });
+      // Show ready state instead of loading spinners
+      document.querySelectorAll('.panel-body').forEach(function(body) {
+        body.innerHTML = '<p style="color:var(--text-dim);">Ready. Ask a question to get started.</p>';
+      });
+    }
+    } catch (err) {
+      console.error('[UI] newChat error:', err);
     }
   }
 
@@ -908,7 +1149,9 @@
 
   // Refresh API status indicators on panels
   async function refreshApiStatus() {
+    try {
     if (!window.aiGateway || !window.aiGateway.getApiKeys) return;
+    if (!window.apiService || !window.apiService.hasApiSupport) return;
     const apiPlatforms = ['chatgpt', 'claude', 'gemini', 'deepseek', 'qwen', 'perplexity', 'kimi'];
     const keys = await window.aiGateway.getApiKeys();
 
@@ -933,10 +1176,16 @@
         });
       }
     });
+    } catch (err) { console.error('[UI] refreshApiStatus error:', err); }
   }
 
   // Initialize on load
   document.addEventListener('DOMContentLoaded', () => {
+    try {
+    // Load conversation history from localStorage
+    loadHistory();
+    renderHistory();
+
     // Create webview tabs (default mode)
     if (currentMode === 'webview') {
       createWebviewTabs();
@@ -947,9 +1196,18 @@
     // Refresh API status so saved keys show "API Mode" indicators
     refreshApiStatus();
 
-    // Setup search box
-    const searchInput = document.getElementById('searchInput');
-    searchInput.value = 'AI Gateway';
+    // Setup search box filtering
+    var searchInput = document.getElementById('searchInput');
+    searchInput.addEventListener('input', function() {
+      var q = this.value.toLowerCase();
+      document.querySelectorAll('.history-item').forEach(function(item) {
+        item.style.display = item.textContent.toLowerCase().indexOf(q) !== -1 ? '' : 'none';
+      });
+    });
+    } catch (err) {
+      console.error('[UI] Init error:', err);
+      document.querySelector('.response-area').innerHTML = '<div style="padding:24px;color:#ef4444;">Failed to initialize. Try reloading the app.<br><small>' + (err.message || '') + '</small></div>';
+    }
   });
 
   // Auto-resize textarea
@@ -957,6 +1215,20 @@
     this.style.height = 'auto';
     this.style.height = (this.scrollHeight) + 'px';
   });
+
+  // Global error handler to prevent blank screens
+  window.onerror = function(msg, url, line, col, error) {
+    console.error('[UI] Global error:', msg, 'at', url, line + ':' + col, error);
+    // Show visible error so the app never silently goes blank
+    var grid = document.getElementById('isolatedView');
+    if (grid && !grid.children.length) {
+      grid.innerHTML = '<div style="padding:24px;color:#ef4444;">Something went wrong. Try clicking "New Chat" or reloading the app.</div>';
+    }
+    return false;
+  };
+  window.onunhandledrejection = function(event) {
+    console.error('[UI] Unhandled promise rejection:', event.reason);
+  };
 
 </script>
 </body>

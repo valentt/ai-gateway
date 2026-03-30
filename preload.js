@@ -15,8 +15,8 @@ contextBridge.exposeInMainWorld('aiGateway', {
   
   getConfigPath: () => ipcRenderer.invoke('get-config-path'),
 
-  // Send question to a model via API
-  sendToModel: (platform, question) => ipcRenderer.invoke('send-to-model', { platform, question }),
+  // Send question to a model via API (generation tracks request freshness)
+  sendToModel: (platform, question, generation) => ipcRenderer.invoke('send-to-model', { platform, question, generation }),
 
   // Event listeners for responses
   onUnifiedResponse: (callback) => {
