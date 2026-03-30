@@ -141,9 +141,10 @@ async function makeApiRequest(platformId, message, apiKey) {
   });
 
   return new Promise((resolve) => {
+    const parsedUrl = new URL(url);
     const options = {
-      hostname: url.replace(/^https?:\/\//, '').split('/')[0],
-      path: url.replace(/^(https?:\/\/)?/i, ''),
+      hostname: parsedUrl.hostname,
+      path: parsedUrl.pathname + parsedUrl.search,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -151,6 +152,12 @@ async function makeApiRequest(platformId, message, apiKey) {
         ...config.headers
       }
     };
+
+    // Anthropic uses x-api-key header instead of Authorization Bearer
+    if (platformId === 'claude') {
+      options.headers['x-api-key'] = apiKey;
+      delete options.headers['Authorization'];
+    }
 
     const req = https.request(options, (res) => {
       let data = '';

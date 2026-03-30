@@ -413,6 +413,54 @@ ipcMain.handle('clear-api-key', async (event, platform) => {
 });
 
 /**
+ * IPC Handler: Send question to a model via API
+ */
+ipcMain.handle('send-to-model', async (event, { platform, question }) => {
+  try {
+    const keys = loadApiKeys();
+    const apiKey = keys[platform]?.apiKey;
+
+    if (!apiKey) {
+      const err = { success: false, error: `No API key configured for ${platform}` };
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) {
+        win.webContents.send('response-scraped', {
+          platform,
+          content: `Error: ${err.error}`,
+          tokens: '0',
+          durationMs: 0,
+          done: true,
+          source: 'api'
+        });
+      }
+      return err;
+    }
+
+    const startTime = Date.now();
+    const result = await apiService.makeApiRequest(platform, question, apiKey);
+    const latency = Date.now() - startTime;
+
+    // Send response to renderer
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) {
+      win.webContents.send('response-scraped', {
+        platform,
+        content: result.success ? result.content : `Error: ${result.error}`,
+        tokens: result.tokens || '?',
+        durationMs: latency,
+        done: true,
+        source: 'api'
+      });
+    }
+
+    return result;
+  } catch (err) {
+    console.error(`[IPC] send-to-model error for ${platform}:`, err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
  * IPC Handler: Get configuration file path
  */
 ipcMain.handle('get-config-path', () => {

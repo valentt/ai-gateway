@@ -12,7 +12,10 @@ contextBridge.exposeInMainWorld('aiGateway', {
   clearApiKey: (platform) => ipcRenderer.invoke('clear-api-key', platform),
   
   getConfigPath: () => ipcRenderer.invoke('get-config-path'),
-  
+
+  // Send question to a model via API
+  sendToModel: (platform, question) => ipcRenderer.invoke('send-to-model', { platform, question }),
+
   // Event listeners for responses
   onUnifiedResponse: (callback) => {
     ipcRenderer.on('response-scraped', (event, data) => {
