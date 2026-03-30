@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const { injectors } = require('./src/injectors');
-const { extractors } = require('./src/extractors');
+const path = require('path');
+const { injectors } = require(path.resolve(__dirname, 'src', 'injectors'));
+const { extractors } = require(path.resolve(__dirname, 'src', 'extractors'));
 
 // Expose protected methods to renderer process
 contextBridge.exposeInMainWorld('aiGateway', {
