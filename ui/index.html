@@ -48,9 +48,21 @@
 
   /* Top bar */
   .topbar { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; background: var(--surface); }
-  .mode-toggle { display: flex; background: var(--surface2); border-radius: 8px; padding: 3px; }
-  .mode-btn { padding: 6px 16px; border: none; background: none; color: var(--text-dim); font-size: 13px; font-weight: 500; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
-  .mode-btn.active { background: var(--accent); color: white; }
+  .mode-toggle { display: flex; background: var(--surface2); border-radius: 12px; padding: 4px; border: 1px solid var(--border); flex-shrink: 0; }
+  .mode-btn { padding: 10px 24px; border: none; background: none; color: var(--text-dim); font-size: 15px; font-weight: 700; border-radius: 9px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px; letter-spacing: 0.01em; }
+  .mode-btn:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.08); }
+  .mode-btn.active[data-mode="chat"] { background: var(--accent); color: white; box-shadow: 0 2px 8px rgba(99,102,241,0.4); }
+  .mode-btn.active[data-mode="browse"] { background: #10b981; color: white; box-shadow: 0 2px 8px rgba(16,185,129,0.4); }
+  .mode-btn .btn-sub { font-size: 10px; font-weight: 500; opacity: 0.85; }
+  /* Pulse animation for Browse button on first visit */
+  @keyframes subtlePulse { 0%,100% { box-shadow: 0 2px 8px rgba(16,185,129,0.4); } 50% { box-shadow: 0 2px 16px rgba(16,185,129,0.7); } }
+  .mode-btn.active[data-mode="browse"].pulse { animation: subtlePulse 2s ease-in-out 3; }
+
+  /* Browse mode instruction banner */
+  .browse-instruction { display: none; padding: 12px 24px; background: rgba(16,185,129,0.12); border-bottom: 1px solid rgba(16,185,129,0.25); color: #10b981; font-size: 14px; text-align: center; font-weight: 500; }
+  .browse-instruction svg { vertical-align: middle; margin-right: 6px; }
+  body.webview-mode .browse-instruction { display: block; }
+  body.api-mode .browse-instruction { display: none; }
   
   /* API key management buttons */
   .api-keys-toggle { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; font-size: 13px; }
@@ -139,12 +151,14 @@
   .webview-tabs {
     display: none; gap: 0; background: var(--surface2);
     border-bottom: 1px solid var(--border); flex-shrink: 0;
+    overflow-x: auto; flex-wrap: nowrap;
   }
   .webview-tab {
-    padding: 8px 20px; font-size: 13px; font-weight: 600;
+    padding: 10px 18px; font-size: 13px; font-weight: 600;
     cursor: pointer; border-bottom: 2px solid transparent;
     color: var(--text-dim); transition: all 0.15s;
     display: flex; align-items: center; gap: 6px;
+    white-space: nowrap;
   }
   .webview-tab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
   .webview-tab.active { color: var(--text); border-bottom-color: var(--accent); }
@@ -171,13 +185,15 @@
   .extraction-bar .ext-status.done { color: #10b981; }
   .extraction-bar .ext-status.error { color: #ef4444; }
 
-  /* Webview mode */
+  /* Webview/Browse mode */
   body.webview-mode .webview-tabs { display: flex; }
   body.webview-mode #webviewContainer { display: flex; }
   body.webview-mode .panels-grid { display: none !important; }
   body.webview-mode .chatroom { display: none; }
   body.webview-mode .response-area { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
   body.webview-mode .extraction-bar { display: block; }
+  body.webview-mode .model-chips { display: none; }
+  body.webview-mode .api-keys-toggle { display: none; }
 
   /* API mode */
   body.api-mode .webview-tabs { display: none; }
@@ -211,10 +227,16 @@
   <!-- Main content -->
   <div class="main">
     <div class="topbar">
-      <!-- Mode toggle for Webview vs API -->
+      <!-- Mode toggle: Chat (API) vs Browse (Webview login) -->
       <div class="mode-toggle">
-        <button class="mode-btn active" onclick="setMode('webview', this)">Webview</button>
-        <button class="mode-btn" onclick="setMode('api', this)">API</button>
+        <button class="mode-btn" data-mode="chat" onclick="setMode('api', this)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+          Chat <span class="btn-sub">API</span>
+        </button>
+        <button class="mode-btn active" data-mode="browse" onclick="setMode('webview', this)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+          Browse <span class="btn-sub">& Login</span>
+        </button>
       </div>
       
       <!-- API Keys management button -->
@@ -241,14 +263,20 @@
 
     <!-- Response area -->
     <div class="response-area" id="responseArea">
+      <!-- Browse mode instruction banner -->
+      <div class="browse-instruction" id="browseInstruction">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+        Click a tab to open a provider. Log in with your free account &mdash; sessions are saved automatically.
+      </div>
+
       <!-- Webview tab bar (shown in webview mode) -->
       <div class="webview-tabs" id="webviewTabs"></div>
 
       <!-- Webview container (shown in webview mode) -->
       <div id="webviewContainer"></div>
 
-      <!-- Extraction results bar (shown in webview mode) -->
-      <div class="extraction-bar" id="extractionBar">Extraction: waiting for prompt...</div>
+      <!-- Extraction results bar (shown in webview mode, hidden until query sent) -->
+      <div class="extraction-bar" id="extractionBar"></div>
 
       <!-- API mode panels (default view) -->
       <div class="panels-grid" id="isolatedView">
@@ -313,6 +341,19 @@
   const MODEL_NAMES = {
     claude: 'Claude',
     gpt: 'GPT-4o',
+    gemini: 'Gemini',
+    qwen: 'Qwen',
+    deepseek: 'DeepSeek',
+    perplexity: 'Perplexity',
+    grok: 'Grok',
+    kimi: 'Kimi',
+    manus: 'Manus'
+  };
+
+  // Friendly provider names for Browse mode tabs
+  const BROWSE_NAMES = {
+    claude: 'Claude',
+    gpt: 'ChatGPT',
     gemini: 'Gemini',
     qwen: 'Qwen',
     deepseek: 'DeepSeek',
@@ -421,9 +462,6 @@
   function toggleChip(el) {
     try {
     el.classList.toggle('selected');
-    if (currentMode === 'webview') {
-      createWebviewTabs();
-    }
     } catch (err) {
       console.error('[UI] toggleChip error:', err);
     }
@@ -826,7 +864,8 @@
   // Create webview tabs for selected models
   function createWebviewTabs() {
     try {
-    var selected = getSelectedModels();
+    // In Browse mode, show ALL providers so user can login to any
+    var selected = Object.keys(MODEL_NAMES);
     var tabBar = document.getElementById('webviewTabs');
     var container = document.getElementById('webviewContainer');
 
@@ -843,7 +882,7 @@
       tab.className = 'webview-tab' + (i === 0 ? ' active' : '');
       tab.dataset.platform = platform;
       tab.innerHTML = '<span class="tab-dot" style="background:' + (MODEL_COLORS[model] || '#999') + '"></span>' +
-        esc(MODEL_NAMES[model] || model) + '<span class="tab-status"></span>';
+        esc(BROWSE_NAMES[model] || MODEL_NAMES[model] || model) + '<span class="tab-status"></span>';
       tab.onclick = function() { switchWebviewTab(platform); };
       tabBar.appendChild(tab);
 
@@ -873,18 +912,6 @@
           if (tab) tab.textContent = 'error';
         });
         container.appendChild(wv);
-      }
-    });
-
-    // Remove webviews for deselected models
-    var selectedPlatforms = selected.map(function(m) { return MODEL_TO_PLATFORM[m] || m; });
-    container.querySelectorAll('webview').forEach(function(wv) {
-      if (selectedPlatforms.indexOf(wv.dataset.platform) === -1) {
-        if (extractionTimers[wv.dataset.platform]) {
-          clearInterval(extractionTimers[wv.dataset.platform]);
-          delete extractionTimers[wv.dataset.platform];
-        }
-        wv.remove();
       }
     });
 
@@ -1006,11 +1033,8 @@
 
     // Switch to API mode to show panels with saved responses
     if (currentMode !== 'api') {
-      var apiBtn = null;
-      document.querySelectorAll('.mode-btn').forEach(function(b) {
-        if (b.textContent.trim() === 'API') apiBtn = b;
-      });
-      if (apiBtn) setMode('api', apiBtn);
+      var chatBtn = document.querySelector('.mode-btn[data-mode="chat"]');
+      if (chatBtn) setMode('api', chatBtn);
     }
 
     // Restore model chip selection
@@ -1191,6 +1215,13 @@
       createWebviewTabs();
     } else {
       runIsolated(getSelectedModels(), {});
+    }
+
+    // Pulse the Browse button on first visit to draw attention
+    if (!localStorage.getItem('ai-gateway-visited')) {
+      var browseBtn = document.querySelector('.mode-btn[data-mode="browse"]');
+      if (browseBtn) browseBtn.classList.add('pulse');
+      localStorage.setItem('ai-gateway-visited', '1');
     }
 
     // Refresh API status so saved keys show "API Mode" indicators
