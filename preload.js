@@ -1,4 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { injectors } = require('./src/injectors');
+const { extractors } = require('./src/extractors');
 
 // Expose protected methods to renderer process
 contextBridge.exposeInMainWorld('aiGateway', {
@@ -48,6 +50,33 @@ contextBridge.exposeInMainWorld('platforms', {
   qwen: { name: 'Qwen', color: '#10b981', icon: 'Q' },
   perplexity: { name: 'Perplexity', color: '#f97316', icon: 'P' },
   manus: { name: 'Manus', color: '#a855f7', icon: 'M' }
+});
+
+// Platform URLs for webview tabs
+contextBridge.exposeInMainWorld('platformUrls', {
+  chatgpt: 'https://chatgpt.com',
+  claude: 'https://claude.ai/chat',
+  gemini: 'https://gemini.google.com/chat',
+  grok: 'https://grok.x.ai',
+  deepseek: 'https://deepseek.com/chat',
+  kimi: 'https://kimi.moonshot.cn/chat',
+  qwen: 'https://chat.qwen.ai',
+  perplexity: 'https://perplexity.ai',
+  manus: 'https://manus.im'
+});
+
+// Webview injection/extraction scripts
+contextBridge.exposeInMainWorld('webviewScripts', {
+  getInjector: (platform, message) => {
+    const fn = injectors[platform];
+    if (fn) return fn(message);
+    // Fallback to generic injector
+    const generic = injectors.grok || injectors.chatgpt;
+    return generic ? generic(message) : null;
+  },
+  getExtractor: (platform) => {
+    return extractors[platform] || extractors.generic || '';
+  }
 });
 
 // Expose API service info to renderer for UI display

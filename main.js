@@ -68,6 +68,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webviewTag: true,
       preload: path.join(__dirname, 'preload.js')
     },
     show: false
@@ -86,184 +87,12 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
-  // Handle webview events
-  mainWindow.webContents.on('did-create-webview', (event, webview) => {
-    console.log('[Main] Webview created:', webview.getId());
-    
-    // Set the data-platform attribute - TASK 1 IMPLEMENTATION
-    const platformId = webview.dataset.platform || '';
-    if (platformId) {
-      webview.dataset.platform = platformId;
-      console.log(`[Main] Set data-platform="${platformId}" for webview ${webview.getId()}`);
-    } else {
-      // Determine platform from URL or frame name
-      const url = webview.getWebContents().getURL();
-      if (url.includes('chatgpt.com')) {
-        webview.dataset.platform = 'chatgpt';
-      } else if (url.includes('claude.ai')) {
-        webview.dataset.platform = 'claude';
-      } else if (url.includes('gemini.google.com')) {
-        webview.dataset.platform = 'gemini';
-      } else if (url.includes('grok.x.ai')) {
-        webview.dataset.platform = 'grok';
-      } else if (url.includes('deepseek.com')) {
-        webview.dataset.platform = 'deepseek';
-      } else if (url.includes('kimi.moonshot.cn')) {
-        webview.dataset.platform = 'kimi';
-      } else if (url.includes('chat.qwen.ai')) {
-        webview.dataset.platform = 'qwen';
-      } else if (url.includes('perplexity.ai')) {
-        webview.dataset.platform = 'perplexity';
-      } else if (url.includes('manus.im')) {
-        webview.dataset.platform = 'manus';
-      }
-      
-      if (webview.dataset.platform) {
-        console.log(`[Main] Auto-detected platform: ${webview.dataset.platform}`);
-      }
-    }
-
-    // Set up webview event listeners
-    webview.addEventListener('dom-ready', () => {
-      console.log('[Main] Webview ready:', webview.getId());
-      
-      // Add context bridge for IPC communication
-      webview.setNodeIntegration(true);
-      webview.addToWebContentsContextBridge({
-        aiGateway: {
-          sendResponseScraped(platform, data) {
-            console.log('[Main] Response scraped:', platform, data);
-            const mainWindow = BrowserWindow.getFocusedWindow();
-            if (mainWindow) {
-              mainWindow.webContents.send('response-scraped', { platform, ...data });
-            }
-          },
-          
-          sendInjectResult(platform, success, error) {
-            console.log('[Main] Inject result:', platform, success, error);
-          }
-        }
-      });
-
-      // Set up API service handler for this webview
-      const platformId = webview.dataset.platform;
-      const keys = loadApiKeys();
-      const apiKey = keys[platformId]?.apiKey;
-
-      if (apiService.shouldUseApi(platformId, apiKey)) {
-        console.log(`[Main] Enabling API mode for ${platformId}`);
-        setupApiMode(webview, platformId, apiKey);
-      } else {
-        console.log(`[Main] Using webview scraping for ${platformId}`);
-        enableWebviewScraping(webview, platformId);
-      }
-    });
-
-    webview.addEventListener('page-favicon-updated', () => {
-      console.log('[Main] Webview loading:', webview.getId());
-    });
-
-    webview.addEventListener('did-fail-load', (event) => {
-      console.error('[Main] Webview load failed:', event.errorCode, event.errorText);
-      
-      // Attempt automatic recovery
-      setTimeout(() => {
-        try {
-          const content = webview.getWebContents();
-          if (content) {
-            content.loadURL(platformEndpoints[event.frameName?.split('-')[0]] || 'about:blank');
-            console.log('[Main] Attempting recovery reload...');
-          }
-        } catch (err) {
-          console.error('[Main] Recovery failed:', err.message);
-        }
-      }, 2000);
-    });
-  });
+  // Webview injection/extraction is handled in the renderer process
+  // via <webview>.executeJavaScript(). No main-process webview
+  // management needed.
 
   mainWindow.on('closed', () => {
     console.log('[Main] Window closed');
-  });
-}
-
-/**
- * Setup API mode for a webview
- */
-function setupApiMode(webview, platformId, apiKey) {
-  let isProcessing = false;
-  let lastContent = '';
-  
-  const pollInterval = setInterval(async () => {
-    if (isProcessing) return;
-    
-    try {
-      const startTime = Date.now();
-      const result = await apiService.makeApiRequest(platformId, '', apiKey);
-      
-      if (!result.success) {
-        console.error(`[API] ${platformId} API error:`, result.error);
-        // Fall back to webview scraping on persistent error
-        enableWebviewScraping(webview, platformId);
-        clearInterval(pollInterval);
-        return;
-      }
-
-      isProcessing = true;
-      
-      // Send response via IPC if listener exists
-      const mainWindow = BrowserWindow.getFocusedWindow();
-      if (mainWindow) {
-        mainWindow.webContents.send('response-scraped', { 
-          platform: platformId,
-          content: result.content,
-          tokens: result.tokens,
-          durationMs: result.durationMs,
-          done: true,
-          source: 'api'
-        });
-      }
-      
-      isProcessing = false;
-    } catch (err) {
-      console.error(`[API] ${platformId} error:`, err);
-      clearInterval(pollInterval);
-    }
-  }, 2000); // Poll every 2 seconds for streaming
-  
-  // Timeout after 60 seconds to fall back to scraping
-  setTimeout(() => {
-    clearInterval(pollInterval);
-    console.log(`[API] ${platformId} API timeout, falling back to webview scraping`);
-  }, 60000);
-}
-
-/**
- * Enable webview scraping mode (fallback)
- */
-function enableWebviewScraping(webview, platformId) {
-  const extractorScript = `
-    (() => {
-      const extractors = {
-        chatgpt: '(()=>{const m=document.querySelectorAll(\'[data-message-author-role="assistant"]\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';const s=document.querySelector(\'button[data-testid="stop-button"]\');return{content:c,done:!s&&c.length>0}})()',
-        claude: '(()=>{const m=document.querySelectorAll(\'.font-claude-message,[class*="message-content"]\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';const s=document.querySelector(\'[data-is-streaming="true"]\');return{content:c,done:!s&&c.length>0}})()',
-        gemini: '(()=>{const m=document.querySelectorAll(\'model-response,[class*="response-content"]\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';const s=document.querySelector(\'mat-progress-bar,.loading-indicator\');return{content:c,done:!s&&c.length>0}})()',
-        grok: '(()=>{const m=document.querySelectorAll(\'.x-message-content,[class*="message"]\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()',
-        deepseek: '(()=>{const m=document.querySelectorAll(\'.ant-chat-item-content\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()',
-        qwen: '(()=>{const m=document.querySelectorAll(\'.qwen-chat-message\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()',
-        perplexity: '(()=>{const m=document.querySelectorAll(\'.perplexity-response-content\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()',
-        kimi: '(()=>{const m=document.querySelectorAll(\'.kimi-response-content\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()',
-        manus: '(()=>{const m=document.querySelectorAll(\'.manus-response-content\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()'
-      };
-      
-      const script = extractors["${platformId}"] || '(()=>{const m=document.querySelectorAll(\'[class*="message"],[class*="response"]\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()';
-      return script;
-    })()
-  `;
-
-  webview.executeJavaScript(extractorScript).then(() => {
-    console.log(`[Main] ${platformId} webview scraping enabled`);
-  }).catch(err => {
-    console.error(`[Main] ${platformId} scraping setup failed:`, err);
   });
 }
 
