@@ -135,7 +135,7 @@
   body.panels-mode .webview-container { display: none; }
   body.panels-mode .response-area { padding: 0; }
   body.panels-mode .chatroom { display: none; }
-  body.panels-mode .panels-grid { display: grid; position: absolute; left: -9999px; top: 0; right: 0; bottom: 0; width: 100%; height: 100%; z-index: 1000; }
+  body.panels-mode .panels-grid { display: grid; position: absolute; left: 0; top: 0; right: 0; bottom: 0; width: 100%; height: 100%; z-index: 1000; }
   body.panels-mode .panel { margin: 0; border-radius: 0; }
 
   /* API mode indicator */
@@ -294,6 +294,7 @@
   // Convert basic markdown-like text to HTML paragraphs
   function formatResponse(text) {
     if (!text) return '';
+    if (typeof text !== 'string') text = String(text);
     return text.split('\n\n').map(p => {
       let html = esc(p).replace(/`([^`]+)`/g, '<code>$1</code>');
       html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -399,11 +400,8 @@
     const selected = getSelectedModels();
     if (selected.length === 0) { alert('Select at least one model'); return; }
 
-    if (currentMode === 'tabs') {
-      runIsolated(selected);
-    } else {
-      runChatroom(selected);
-    }
+    // Both tabs and panels modes use isolated panels for display
+    runIsolated(selected);
 
     // Send to each selected model via IPC
     selected.forEach(function(platform) {
@@ -421,42 +419,22 @@
   if (window.aiGateway && window.aiGateway.onUnifiedResponse) {
     window.aiGateway.onUnifiedResponse(function(data) {
       const { platform, content, tokens, durationMs, done, source } = data;
-      
+
       console.log('[Renderer] Received response:', platform, { tokens, durationMs, source });
-      
-      if (currentMode === 'isolated' || currentMode === 'tabs') {
-        // Update isolated panel
-        const body = document.querySelector(`.panel-body[data-model="${platform}"]`);
-        const meta = document.querySelector(`.panel[data-model="${platform}"] .panel-meta`);
-        if (!body) return;
 
-        if (done && content) {
-          const secs = ((durationMs || 0) / 1000).toFixed(1);
-          meta.textContent = `${secs}s · ${tokens || '?'} tokens`;
-          body.innerHTML = formatResponse(content);
-          body.dataset.rawText = content;
-        } else if (content) {
-          if (body.querySelector('.typing')) {
-            body.innerHTML = '';
-          }
-          body.innerHTML = formatResponse(content);
-          meta.textContent = 'generating...';
-        }
-      } else if (currentMode === 'chatroom') {
-        // Update chatroom message
-        const indicator = document.querySelector(`.chat-msg[data-model="${platform}"]`);
-        if (!indicator) return;
-        const textEl = indicator.querySelector('.chat-text');
+      // Update isolated panel (used in both tabs and panels modes)
+      const body = document.querySelector(`.panel-body[data-model="${platform}"]`);
+      const meta = document.querySelector(`.panel[data-model="${platform}"] .panel-meta`);
+      if (!body) return;
 
-        if (done && content) {
-          textEl.innerHTML = formatResponse(content);
-        } else if (content) {
-          if (textEl.querySelector('.typing')) textEl.innerHTML = '';
-          textEl.innerHTML = formatResponse(content);
-        }
-
-        const room = document.getElementById('chatroomView');
-        if (room) room.scrollTop = room.scrollHeight;
+      if (done) {
+        const secs = ((durationMs || 0) / 1000).toFixed(1);
+        if (meta) meta.textContent = `${secs}s · ${tokens || '?'} tokens`;
+        body.innerHTML = content ? formatResponse(content) : '<p style="color:var(--text-dim);">No response received.</p>';
+        if (content) body.dataset.rawText = content;
+      } else if (content) {
+        body.innerHTML = formatResponse(content);
+        if (meta) meta.textContent = 'generating...';
       }
     });
   }
@@ -603,13 +581,6 @@
       }
     });
   }
-
-  // Listen for API key changes to update status
-  window.aiGateway.onUnifiedResponse(function(data) {
-    if (data.source === 'api') {
-      console.log('[Renderer] API call successful, updating status');
-    }
-  });
 
   // Initialize on load
   document.addEventListener('DOMContentLoaded', () => {

@@ -180,7 +180,10 @@ async function makeApiRequest(platformId, message, apiKey) {
           if (platformId === 'chatgpt' || platformId === 'deepseek') {
             content = json.choices?.[0]?.message?.content || '';
           } else if (platformId === 'claude') {
-            content = json.content || '';
+            // Anthropic returns { content: [{type: 'text', text: '...'}] }
+            content = Array.isArray(json.content)
+              ? json.content.map(c => c.text || '').join('')
+              : (json.content || '');
           } else if (platformId === 'gemini') {
             content = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
           } else {

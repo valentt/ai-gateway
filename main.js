@@ -456,6 +456,17 @@ ipcMain.handle('send-to-model', async (event, { platform, question }) => {
     return result;
   } catch (err) {
     console.error(`[IPC] send-to-model error for ${platform}:`, err.message);
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) {
+      win.webContents.send('response-scraped', {
+        platform,
+        content: `Error: ${err.message}`,
+        tokens: '0',
+        durationMs: 0,
+        done: true,
+        source: 'api'
+      });
+    }
     return { success: false, error: err.message };
   }
 });
