@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Expose protected methods to renderer process
 contextBridge.exposeInMainWorld('aiGateway', {
   // IPC handlers for API key management
-  openSettings: () => ipcRenderer.send('open-settings'),
+  openSettings: () => ipcRenderer.invoke('open-settings'),
   
   getApiKeys: () => ipcRenderer.invoke('get-api-keys'),
   
@@ -67,8 +67,7 @@ contextBridge.exposeInMainWorld('apiService', {
   
   // Check if a platform supports direct API
   hasApiSupport: (platform) => {
-    const apiPlatforms = Object.keys(contextBridge.exposedInMainWorld.platforms);
-    return apiPlatforms.includes(platform) && 
-           ['chatgpt', 'claude', 'gemini', 'deepseek', 'qwen', 'perplexity', 'kimi'].includes(platform);
+    const supported = ['chatgpt', 'claude', 'gemini', 'deepseek', 'qwen', 'perplexity', 'kimi'];
+    return supported.includes(platform);
   }
 });

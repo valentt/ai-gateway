@@ -131,26 +131,33 @@
       document.getElementById('saveBtn').addEventListener('click', saveApiKeys);
     });
 
-    function loadApiKeys() {
-      // Try to read from localStorage first
-      const stored = localStorage.getItem('apiGateway_keys');
-      if (stored) {
-        apiKeys = JSON.parse(stored);
+    async function loadApiKeys() {
+      // Load from main process via IPC
+      const defaultKeys = {
+        chatgpt: { apiKey: null, organizationId: null },
+        claude: { apiKey: null },
+        gemini: { apiKey: null },
+        grok: { apiKey: null },
+        deepseek: { apiKey: null },
+        kimi: { apiKey: null },
+        qwen: { apiKey: null },
+        perplexity: { apiKey: null },
+        manus: { apiKey: null }
+      };
+
+      if (window.aiGateway && window.aiGateway.getApiKeys) {
+        try {
+          const stored = await window.aiGateway.getApiKeys();
+          // Merge stored keys with defaults so all platforms exist
+          apiKeys = { ...defaultKeys, ...stored };
+        } catch (err) {
+          console.error('Failed to load API keys:', err);
+          apiKeys = defaultKeys;
+        }
       } else {
-        // Default configuration
-        apiKeys = {
-          chatgpt: { apiKey: null, organizationId: null },
-          claude: { apiKey: null },
-          gemini: { apiKey: null },
-          grok: { apiKey: null },
-          deepseek: { apiKey: null },
-          kimi: { apiKey: null },
-          qwen: { apiKey: null },
-          perplexity: { apiKey: null },
-          manus: { apiKey: null }
-        };
+        apiKeys = defaultKeys;
       }
-      
+
       updatePanel();
     }
 
@@ -210,30 +217,34 @@
       });
     }
 
-    function saveApiKeys() {
+    async function saveApiKeys() {
       const input = document.getElementById('apiKeyInput');
       const key = input.value.trim();
-      
-      // Update configuration
+
+      // Update local state
       apiKeys[selectedPlatform].apiKey = key || null;
-      
-      // Save to localStorage
-      localStorage.setItem('apiGateway_keys', JSON.stringify(apiKeys));
-      
-      showToast('Configuration saved!', 'success');
-      
-      // Also try to write to file if possible
-      try {
-        const fs = require('fs');
-        const path = require('path');
-        const userDataPath = app.getPath('userData');
-        const configPath = path.join(userDataPath, 'api-keys.json');
-        
-        fs.writeFileSync(configPath, JSON.stringify(apiKeys, null, 2));
-      } catch (err) {
-        // File write failed, but localStorage saved anyway
+
+      if (window.aiGateway) {
+        try {
+          // Save each platform's key via IPC to main process
+          for (const [platform, config] of Object.entries(apiKeys)) {
+            if (config.apiKey) {
+              await window.aiGateway.setApiKey(platform, config.apiKey);
+            } else {
+              await window.aiGateway.clearApiKey(platform);
+            }
+          }
+          showToast('Configuration saved!', 'success');
+        } catch (err) {
+          console.error('Failed to save API keys:', err);
+          showToast('Failed to save configuration', 'error');
+          return;
+        }
+      } else {
+        showToast('IPC not available — keys not persisted', 'error');
+        return;
       }
-      
+
       // Update button state
       document.getElementById('saveBtn').textContent = 'Saved!';
       document.getElementById('saveBtn').disabled = true;

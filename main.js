@@ -272,95 +272,22 @@ function enableWebviewScraping(webview, platformId) {
  */
 ipcMain.handle('open-settings', async () => {
   try {
-    const keys = loadApiKeys();
-    
-    // Create settings window
+    // Create settings window with preload for IPC access
     const settingsWindow = new BrowserWindow({
       width: 600,
-      height: 500,
+      height: 700,
       parent: BrowserWindow.getFocusedWindow(),
       modal: true,
       resizable: false,
       webPreferences: {
         nodeIntegration: false,
-        contextIsolation: true
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js')
       }
     });
 
-    // Load settings HTML (create inline)
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>API Settings</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: -apple-system, 'Inter', sans-serif; background: #f9fafb; color: #1f2937; padding: 24px; }
-          h1 { margin-bottom: 24px; font-size: 24px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
-          .settings-panel { max-width: 500px; margin: 0 auto; }
-          .api-key-group { margin-bottom: 24px; }
-          .api-key-label { display: block; margin-bottom: 8px; font-weight: 600; font-size: 14px; color: #374151; }
-          .api-key-input { width: 100%; padding: 12px 16px; background: white; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
-          .api-key-input:focus { border-color: #6366f1; }
-          .save-btn { width: 100%; padding: 14px; background: #6366f1; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-          .save-btn:hover { background: #4f46e5; }
-          .save-btn:disabled { background: #9ca3af; cursor: not-allowed; }
-          .info-box { background: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 16px; margin-top: 24px; border-radius: 8px; }
-        </style>
-      </head>
-      <body>
-        <div class="settings-panel">
-          <h1>🔑 API Settings</h1>
-          
-          <form id="api-settings-form">
-            ${Object.entries(keys).map(([platform, config]) => `
-              <div class="api-key-group" data-platform="${platform}">
-                <label class="api-key-label">${config.baseUrl || platform}</label>
-                <input type="password" class="api-key-input" name="${platform}" value="${config.apiKey || ''}" placeholder="Enter API key...">
-              </div>
-            `).join('')}
-            
-            <button type="submit" class="save-btn">Save Configuration</button>
-          </form>
-          
-          <p style="margin-top: 16px; font-size: 12px; color: #6b7280;">
-            API keys are stored locally and never sent to any server.
-          </p>
-        </div>
-      </body>
-      </html>
-    `;
-
-    settingsWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-
-    // Handle form submission
-    settingsWindow.on('dom-ready', () => {
-      const form = settingsWindow.document.getElementById('api-settings-form');
-      if (form) {
-        form.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          
-          const inputs = settingsWindow.document.querySelectorAll('.api-key-input');
-          const newKeys = {};
-          
-          for (const input of inputs) {
-            const platform = input.dataset.platform;
-            const key = input.value.trim();
-            newKeys[platform] = { apiKey: key };
-            
-            // Try to save immediately
-            if (!saveApiKeys(newKeys)) {
-              console.error('[Settings] Failed to save keys');
-            }
-          }
-          
-          settingsWindow.close();
-        });
-      }
-    });
-
-    return settingsWindow;
+    settingsWindow.loadFile(path.join(__dirname, 'ui', 'settings.html'));
+    return true;
   } catch (err) {
     console.error('[Settings] Error:', err.message);
     return null;

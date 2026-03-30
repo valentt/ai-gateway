@@ -1,19 +1,34 @@
-# AI Gateway v2 - Add data-platform attributes to webviews
+# AI Gateway v2 - Fix Core Message Flow
 
 Project: `C:/Users/Valent/code/ai-gateway/`
 
-## Task 1: Find where webviews are created and add data-platform attribute
+## Critical Bug: sendQuestion() does nothing
 
-The UI in `ui/index.html` creates webview elements dynamically for each AI provider (chatgpt, claude, gemini, grok, deepseek, kimi, qwen, perplexity, manus). Find where `<webview>` elements are created (search for createElement, webview, or src assignment) and add `data-platform="${platformId}"` attribute to each.
+In `ui/index.html`, the `sendQuestion()` function clears input but NEVER sends to API or webview. Fix this:
 
-The unified inject handler looks for `webview[data-platform="${platform}"]` to find the right webview to inject prompts into.
+1. When user clicks Send, get selected models from the chip toggles
+2. For each selected model, call the API via IPC (`window.aiGateway.sendToModel(platform, question)`)
+3. In `main.js`, handle this IPC call: use `api-service.js` to make the actual API request with the user's message
+4. Return the response back to the renderer via `window.aiGateway.onUnifiedResponse`
+5. Display each model's response in the appropriate panel
 
-## Task 2: Add dual-mode toggle (Tabs vs Panels)
+## Bug 2: API requests send empty message
 
-Add a toggle in the topbar with two buttons: "Tabs" and "Panels". In Tabs mode show the webview tabs normally. In Panels mode hide webviews offscreen (position:absolute; left:-9999px) and show the response panels grid instead.
+In `main.js` around `setupApiMode()`, `makeApiRequest(platformId, '', apiKey)` passes empty string as message. Fix to pass actual user message.
+
+## Bug 3: IPC plumbing broken
+
+- `preload.js` exposes `onUnifiedResponse()` but `main.js` never sends through that channel
+- Fix: when API response arrives in main process, send it to renderer via `webContents.send('unified-response', {platform, response})`
+
+## Bug 4: Mode switching incomplete
+
+- `currentMode` uses 'tabs'/'panels' but code checks for 'isolated'
+- Fix mode constants to be consistent
 
 ## Rules
-- Work ONLY in `C:/Users/Valent/code/ai-gateway/` (Electron project)
-- Vanilla JS, no frameworks
-- Read existing code before modifying
-- Keep all existing injector/extractor/IPC code intact
+- Work ONLY in `C:/Users/Valent/code/ai-gateway/`
+- Vanilla JS, no frameworks, no npm dependencies beyond electron
+- Read existing code BEFORE modifying
+- Keep all existing webview/tab functionality intact
+- Test by checking that the code is syntactically valid
