@@ -342,7 +342,8 @@
         <div class="panel-footer">
           <button onclick="copyPanel('${model}')">Copy</button>
           <button onclick="expandPanel('${model}')">Expand</button>
-        </div>`;
+        </div>
+      </div>`;
   }
 
   // Generate chatroom message HTML for a model
@@ -357,7 +358,8 @@
         <div class="chat-content">
           <div class="chat-sender" style="color:${color}">${name} ${replyTag}</div>
           <div class="chat-text"><div class="typing"><span></span><span></span><span></span></div></div>
-        </div>`;
+        </div>
+      </div>`;
   }
 
   // Isolated mode: create panels for selected models
@@ -366,11 +368,7 @@
     grid.innerHTML = '';
     
     models.forEach(m => {
-      const panel = document.createElement('div');
-      panel.className = 'panel';
-      panel.dataset.model = m;
-      panel.innerHTML = createPanelHTML(m, apiStatus[m] || 'manual');
-      grid.appendChild(panel);
+      grid.insertAdjacentHTML('beforeend', createPanelHTML(m, apiStatus[m] || 'manual'));
     });
   }
 
@@ -383,11 +381,7 @@
     
     if (models.length > 0) {
       models.forEach((m, i) => {
-        const msg = document.createElement('div');
-        msg.className = 'chat-msg';
-        msg.dataset.model = m;
-        msg.innerHTML = createChatMsgHTML(m, i > 0 ? models[i-1] : null);
-        room.appendChild(msg);
+        room.insertAdjacentHTML('beforeend', createChatMsgHTML(m, i > 0 ? models[i-1] : null));
       });
     } else {
       room.innerHTML = '<div class="empty-state"><h2>Chat Room</h2><p>Select a model above and ask a question.</p></div>';
@@ -405,11 +399,22 @@
     const selected = getSelectedModels();
     if (selected.length === 0) { alert('Select at least one model'); return; }
 
-    if (currentMode === 'isolated') {
+    if (currentMode === 'tabs') {
       runIsolated(selected);
     } else {
       runChatroom(selected);
     }
+
+    // Send to each selected model via IPC
+    selected.forEach(function(platform) {
+      if (window.aiGateway && window.aiGateway.sendToModel) {
+        window.aiGateway.sendToModel(platform, q).catch(function(err) {
+          console.error('[Renderer] Send failed for', platform, err);
+          var body = document.querySelector('.panel-body[data-model="' + platform + '"]');
+          if (body) body.innerHTML = '<p style="color:#ef4444;">Error: ' + esc(err.message || String(err)) + '</p>';
+        });
+      }
+    });
   }
 
   // Listen for unified responses from main process
@@ -422,7 +427,7 @@
       if (currentMode === 'isolated' || currentMode === 'tabs') {
         // Update isolated panel
         const body = document.querySelector(`.panel-body[data-model="${platform}"]`);
-        const meta = document.querySelector(`.panel-meta[data-model="${platform}"]`);
+        const meta = document.querySelector(`.panel[data-model="${platform}"] .panel-meta`);
         if (!body) return;
 
         if (done && content) {
