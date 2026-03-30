@@ -11,7 +11,7 @@
     --border: #2d3148; --text: #e4e4e7; --text-dim: #71717a;
     --accent: #6366f1; --accent-hover: #818cf8;
     --claude: #d4a574; --gpt: #74aa9c; --gemini: #4285f4;
-    --qwen: #ff6b35; --llama: #a855f7; --mistral: #f97316;
+    --qwen: #ff6b35; --deepseek: #6366f1; --perplexity: #f97316;
   }
   body { font-family: -apple-system, 'Inter', 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
@@ -64,8 +64,8 @@
   .chip[data-model="gpt"] { background: rgba(116,170,156,0.15); color: var(--gpt); border-color: var(--gpt); }
   .chip[data-model="gemini"] { background: rgba(66,133,244,0.15); color: var(--gemini); border-color: var(--gemini); }
   .chip[data-model="qwen"] { background: rgba(255,107,53,0.15); color: var(--qwen); border-color: var(--qwen); }
-  .chip[data-model="llama"] { background: rgba(168,85,247,0.15); color: var(--llama); border-color: var(--llama); }
-  .chip[data-model="mistral"] { background: rgba(249,115,22,0.15); color: var(--mistral); border-color: var(--mistral); }
+  .chip[data-model="deepseek"] { background: rgba(99,102,241,0.15); color: var(--deepseek); border-color: var(--deepseek); }
+  .chip[data-model="perplexity"] { background: rgba(249,115,22,0.15); color: var(--perplexity); border-color: var(--perplexity); }
 
   /* Response area */
   .response-area { flex: 1; overflow-y: auto; padding: 24px; }
@@ -194,8 +194,8 @@
         <div class="chip selected" data-model="gpt" onclick="toggleChip(this)">GPT-4o</div>
         <div class="chip selected" data-model="gemini" onclick="toggleChip(this)">Gemini</div>
         <div class="chip" data-model="qwen" onclick="toggleChip(this)">Qwen</div>
-        <div class="chip" data-model="llama" onclick="toggleChip(this)">Llama 3</div>
-        <div class="chip" data-model="mistral" onclick="toggleChip(this)">Mistral</div>
+        <div class="chip" data-model="deepseek" onclick="toggleChip(this)">DeepSeek</div>
+        <div class="chip" data-model="perplexity" onclick="toggleChip(this)">Perplexity</div>
       </div>
     </div>
 
@@ -257,31 +257,31 @@
 <script>
   let currentMode = 'tabs';
   
-  const MODEL_COLORS = { 
-    claude: 'var(--claude)', 
-    gpt: 'var(--gpt)', 
-    gemini: 'var(--gemini)', 
-    qwen: 'var(--qwen)', 
-    llama: 'var(--llama)', 
-    mistral: 'var(--mistral)' 
+  const MODEL_COLORS = {
+    claude: 'var(--claude)',
+    gpt: 'var(--gpt)',
+    gemini: 'var(--gemini)',
+    qwen: 'var(--qwen)',
+    deepseek: 'var(--deepseek)',
+    perplexity: 'var(--perplexity)'
   };
-  
-  const MODEL_NAMES = { 
-    claude: 'Claude', 
-    gpt: 'GPT-4o', 
-    gemini: 'Gemini', 
-    qwen: 'Qwen', 
-    llama: 'Llama 3', 
-    mistral: 'Mistral' 
+
+  const MODEL_NAMES = {
+    claude: 'Claude',
+    gpt: 'GPT-4o',
+    gemini: 'Gemini',
+    qwen: 'Qwen',
+    deepseek: 'DeepSeek',
+    perplexity: 'Perplexity'
   };
-  
+
   const MODEL_INITIALS = {
     claude: 'C',
     gpt: 'G',
     gemini: 'Ge',
     qwen: 'Q',
-    llama: 'L',
-    mistral: 'M'
+    deepseek: 'D',
+    perplexity: 'P'
   };
 
   // Map UI model chip IDs to API platform IDs used in api-service + key storage
@@ -290,8 +290,8 @@
     gpt: 'chatgpt',
     gemini: 'gemini',
     qwen: 'qwen',
-    llama: 'llama',
-    mistral: 'mistral'
+    deepseek: 'deepseek',
+    perplexity: 'perplexity'
   };
 
   // Escape HTML to prevent XSS
@@ -301,14 +301,29 @@
     return d.innerHTML;
   }
 
-  // Convert basic markdown-like text to HTML paragraphs
+  // Convert basic markdown-like text to HTML
   function formatResponse(text) {
     if (!text) return '';
     if (typeof text !== 'string') text = String(text);
-    return text.split('\n\n').map(p => {
-      let html = esc(p).replace(/`([^`]+)`/g, '<code>$1</code>');
-      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-      return `<p>${html}</p>`;
+
+    // Split on fenced code blocks, preserving them
+    var parts = text.split(/(```[\s\S]*?```)/g);
+    return parts.map(function(part) {
+      if (part.startsWith('```') && part.endsWith('```')) {
+        var inner = part.slice(3, -3);
+        var nl = inner.indexOf('\n');
+        var code = nl > -1 ? inner.slice(nl + 1) : inner;
+        return '<pre style="background:var(--surface2);padding:12px;border-radius:8px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0;"><code>' + esc(code) + '</code></pre>';
+      }
+      // Regular text: split into paragraphs on double newlines
+      return part.split('\n\n').map(function(p) {
+        if (!p.trim()) return '';
+        var html = esc(p).replace(/`([^`]+)`/g, '<code>$1</code>');
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        // Preserve single newlines as <br> for lists, line breaks, etc.
+        html = html.replace(/\n/g, '<br>');
+        return '<p>' + html + '</p>';
+      }).join('');
     }).join('');
   }
 
@@ -447,7 +462,12 @@
       if (done) {
         const secs = ((durationMs || 0) / 1000).toFixed(1);
         if (meta) meta.textContent = `${secs}s · ${tokens || '?'} tokens`;
-        body.innerHTML = content ? formatResponse(content) : '<p style="color:var(--text-dim);">No response received.</p>';
+        if (content && content.startsWith('Error:')) {
+          body.innerHTML = '<p style="color:#ef4444;">' + esc(content) + '</p>';
+          if (meta) { meta.textContent = 'error'; meta.style.color = '#ef4444'; }
+        } else {
+          body.innerHTML = content ? formatResponse(content) : '<p style="color:var(--text-dim);">No response received.</p>';
+        }
         if (content) body.dataset.rawText = content;
       } else if (content) {
         body.innerHTML = formatResponse(content);

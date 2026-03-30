@@ -109,7 +109,11 @@ const PLATFORM_API_CONFIG = {
  */
 async function makeApiRequest(platformId, message, apiKey) {
   const config = PLATFORM_API_CONFIG[platformId];
-  
+
+  if (!config) {
+    return { success: false, error: `Platform '${platformId}' is not supported` };
+  }
+
   if (!config.hasApi || !apiKey) {
     return { success: false, error: 'API not available or not configured' };
   }
@@ -131,14 +135,21 @@ async function makeApiRequest(platformId, message, apiKey) {
       url = config.baseUrl;
   }
 
-  const body = JSON.stringify({
-    model: getDefaultModel(platformId),
-    messages: [
-      { role: 'user', content: message }
-    ],
-    temperature: 0.7,
-    max_tokens: 2048
-  });
+  let body;
+  if (platformId === 'gemini') {
+    // Gemini uses a different request format
+    body = JSON.stringify({
+      contents: [{ parts: [{ text: message }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+    });
+  } else {
+    body = JSON.stringify({
+      model: getDefaultModel(platformId),
+      messages: [{ role: 'user', content: message }],
+      temperature: 0.7,
+      max_tokens: 2048
+    });
+  }
 
   return new Promise((resolve) => {
     const parsedUrl = new URL(url);
@@ -251,9 +262,9 @@ function getDefaultModel(platformId) {
  */
 function shouldUseApi(platformId, apiKey) {
   const config = PLATFORM_API_CONFIG[platformId];
-  
+
   // Use API if available and key is configured
-  return config.hasApi && !!apiKey;
+  return !!(config && config.hasApi && apiKey);
 }
 
 /**
@@ -349,7 +360,7 @@ function enableWebviewScraping(platformId, webview) {
         manus: '(()=>{const m=document.querySelectorAll(\'.manus-response-content\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()'
       };
       
-      const script = extractors[${platformId}] || '(()=>{const m=document.querySelectorAll(\'[class*="message"],[class*="response"]\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()';
+      const script = extractors["${platformId}"] || '(()=>{const m=document.querySelectorAll(\'[class*="message"],[class*="response"]\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()';
       return script;
     })()
   `;

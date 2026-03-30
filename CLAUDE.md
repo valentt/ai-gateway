@@ -1,24 +1,27 @@
-# AI Gateway v2 - Bug Fix Session (Round 4)
+# AI Gateway v2 - Bug Fix Session (Round 5)
 
 You are fixing bugs in this Electron app. Work ONLY in this directory.
 
-## Previous fixes (DONE):
+## Previous fixes (DONE, rounds 1-4):
 - sendQuestion() sends via IPC
 - send-to-model IPC handler in main.js
 - API URL parsing + Anthropic auth
 - Response display in panels
-- CSS panels visibility
-- Spinner stuck fix
+- CSS panels visibility + spinner fix
+- Settings dialog + API key persistence
+- refreshApiStatus on startup
 
-## Round 4: Settings dialog + API key persistence
+## Round 5: End-to-end testing and remaining issues
 
-Check and fix the Settings dialog flow:
-1. In `ui/settings.html`, verify the save button sends keys back to main process
-2. In `main.js`, verify save-api-key handler stores keys to config/api-keys.json
-3. In `preload.js`, verify settings IPC methods are exposed
-4. Test: can a user open settings, enter an API key, save, and then send a question?
+Read through the full flow and find any remaining bugs:
 
-Also check: does the app correctly load saved API keys on startup?
+1. Check `main.js` for duplicate IPC handlers (there may be old ones conflicting with new ones)
+2. Check that response-scraped event data format matches what renderer expects
+3. Check that `formatResponse()` in index.html properly renders markdown/code blocks
+4. Check error handling: what happens when API returns an error? Does the panel show it?
+5. Check that model selection chips correctly map to API platform IDs
+
+Fix anything broken. The goal is a working demo where you can enter an API key, select a model, ask a question, and see the response.
 
 ## Rules
 - Vanilla JS only, no frameworks

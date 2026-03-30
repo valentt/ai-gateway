@@ -255,7 +255,7 @@ function enableWebviewScraping(webview, platformId) {
         manus: '(()=>{const m=document.querySelectorAll(\'.manus-response-content\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()'
       };
       
-      const script = extractors[${platformId}] || '(()=>{const m=document.querySelectorAll(\'[class*="message"],[class*="response"]\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()';
+      const script = extractors["${platformId}"] || '(()=>{const m=document.querySelectorAll(\'[class*="message"],[class*="response"]\');if(!m.length)return{content:\'\',done:false};const l=m[m.length-1];const c=l.innerText||\'\';return{content:c,done:c.length>0}})()';
       return script;
     })()
   `;
@@ -344,6 +344,24 @@ ipcMain.handle('clear-api-key', async (event, platform) => {
  */
 ipcMain.handle('send-to-model', async (event, { platform, question }) => {
   try {
+    // Check if platform has API support
+    const platformConfig = apiService.PLATFORM_API_CONFIG[platform];
+    if (!platformConfig || !platformConfig.hasApi) {
+      const err = { success: false, error: `${platform} does not have API support` };
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) {
+        win.webContents.send('response-scraped', {
+          platform,
+          content: `Error: ${err.error}`,
+          tokens: '0',
+          durationMs: 0,
+          done: true,
+          source: 'api'
+        });
+      }
+      return err;
+    }
+
     const keys = loadApiKeys();
     const apiKey = keys[platform]?.apiKey;
 
@@ -412,9 +430,8 @@ app.whenReady().then(() => {
   createWindow();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length) {
-      const mainWindow = BrowserWindow.getFocusedWindow();
-      if (mainWindow) mainWindow.show();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
     }
   });
 });
